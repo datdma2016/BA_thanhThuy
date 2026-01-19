@@ -10,7 +10,7 @@ def ket_noi_sheet():
     creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
     client = gspread.authorize(creds)
     # --- NHỚ SỬA TÊN SHEET CỦA BẠN LẠI NHÉ ---
-    sheet = client.open("Tên File Sheet Của Bạn").sheet1 
+    sheet = client.open("pancakeTest_260120").sheet1 
     return sheet
 
 @app.route('/')
