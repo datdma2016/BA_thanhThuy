@@ -15,7 +15,7 @@ def ket_noi_sheet():
     
     # --- QUAN TRỌNG: SỬA TÊN FILE SHEET CỦA BẠN Ở DƯỚI ĐÂY ---
     # Ví dụ file sheet tên là "Data Khach Hang" thì điền y hệt vào
-    sheet = client.open("Tên File Sheet Của Bạn").sheet1 
+    sheet = client.open("pancakeTest_260120").sheet1 
     return sheet
 
 @app.route('/')
