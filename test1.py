@@ -1,33 +1,49 @@
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from flask import Flask
-from datetime import datetime, timedelta # <--- Đã thêm thư viện xử lý giờ
+from flask import Flask, request, jsonify
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+# --- CẤU HÌNH KẾT NỐI SHEET ---
 def ket_noi_sheet():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
     client = gspread.authorize(creds)
-    # --- NHỚ SỬA TÊN SHEET CỦA BẠN LẠI NHÉ ---
+    # Tên sheet chuẩn của bạn
     sheet = client.open("pancakeTest_260120").sheet1 
     return sheet
 
+# --- TRANG CHỦ (Để bạn test xem web còn sống không) ---
 @app.route('/')
 def home():
+    return "Hệ thống Webhook Pancake đang chạy ngon lành!"
+
+# --- CỔNG NHẬN DỮ LIỆU (WEBHOOK) ---
+@app.route('/webhook', methods=['POST'])
+def nhan_webhook():
     try:
+        # 1. Nhận gói tin từ Pancake
+        du_lieu = request.json
+        print("Dữ liệu nhận được:", du_lieu) # In ra màn hình log để kiểm tra
+        
+        # 2. Xử lý thời gian
+        gio_vn = datetime.now() + timedelta(hours=7)
+        thoi_gian = gio_vn.strftime("%H:%M:%S - %d/%m/%Y")
+        
+        # 3. Chuyển dữ liệu thành dạng chuỗi để ghi vào Sheet (test trước)
+        # Lát nữa biết cấu trúc rồi mình sẽ tách lấy Tên, SĐT sau
+        noidung_tho = str(du_lieu)
+        
+        # 4. Ghi vào Google Sheet
         sheet = ket_noi_sheet()
+        sheet.append_row(["WEBHOOK PANCAKE", thoi_gian, noidung_tho])
         
-        # --- ĐOẠN NÀY ĐỂ CHỈNH GIỜ VIỆT NAM ---
-        # Lấy giờ hiện tại của server (UTC) cộng thêm 7 tiếng
-        gio_vn = datetime.now() + timedelta(hours=7) 
-        thoi_gian_dep = gio_vn.strftime("%H:%M:%S - Ngày %d/%m/%Y")
+        return jsonify({"status": "success", "message": "Đã nhận được tin!"}), 200
         
-        # Ghi vào sheet
-        sheet.append_row(["Test múi giờ", thoi_gian_dep, "Đã chuẩn giờ VN!"])
-        return f"Đã ghi xong! Giờ Việt Nam là: {thoi_gian_dep}"
     except Exception as e:
-        return f"Lỗi: {str(e)}"
+        print(f"Lỗi: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
