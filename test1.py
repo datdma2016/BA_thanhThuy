@@ -40,7 +40,6 @@ def fmt_vn(value):
         return str(value)
 
 def get_fb_value(data_list, keys_target, value_key='value'):
-    """Hàm đào dữ liệu đa năng"""
     if not data_list: return 0
     for k in keys_target:
         for item in data_list:
@@ -49,6 +48,7 @@ def get_fb_value(data_list, keys_target, value_key='value'):
     return 0
 
 def check_keyword_v12(ten_camp, keyword_string):
+    """Kiểm tra logic AND/OR/NOT cho bộ lọc tổng"""
     if not keyword_string: return True
     ten_camp_lower = ten_camp.lower()
     or_groups = keyword_string.split(',') 
@@ -76,7 +76,7 @@ def check_keyword_v12(ten_camp, keyword_string):
 
 @app.route('/')
 def home():
-    return "<h1>Bot V18: Video Deep Scan - Fix Metrics 0</h1>"
+    return "<h1>Bot V19: Video + Sales + Keyword Compare Ready!</h1>"
 
 @app.route('/fb-ads')
 def lay_data_fb():
@@ -89,7 +89,6 @@ def lay_data_fb():
             .error { color: #f85149; }
             .warning { color: #d29922; }
             .info { color: #8b949e; }
-            .debug { color: #e3b341; font-weight:bold; } /* Màu vàng cho Debug */
             .sleep { color: #d2a8ff; font-style: italic; }
             .highlight { color: #58a6ff; font-weight: bold; }
             
@@ -104,14 +103,15 @@ def lay_data_fb():
             .kpi-value { font-size: 18px; font-weight: bold; margin-top: 5px; color: #f0f6fc; }
             
             .final-section { background: #0d1117; border-top: 2px solid #30363d; margin-top: 30px; padding-top: 20px; }
+            h2 { color: #f0f6fc; margin-top: 30px; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
         </style>
-        <h3>> KHỞI ĐỘNG V18 (VIDEO DEEP SCAN)...</h3>
+        <h3>> KHỞI ĐỘNG V19 (FULL METRICS + KEYWORD COMPARE)...</h3>
         """
         
         try:
             # --- 1. LẤY THAM SỐ ---
             keyword = request.args.get('keyword', '')
-            ten_tab = request.args.get('sheet', 'BaoCaoV18_VideoFix')
+            ten_tab = request.args.get('sheet', 'BaoCaoV19_Compare')
             start_date = request.args.get('start')
             end_date = request.args.get('end')
             date_preset = request.args.get('date', 'today')
@@ -125,6 +125,11 @@ def lay_data_fb():
                 thoi_gian_bao_cao = date_preset
 
             yield f"<div class='log info'>[INIT] Config: Tab='{ten_tab}' | Key='{keyword}'</div>"
+            
+            # --- TÁCH TỪ KHÓA ĐỂ SO SÁNH ---
+            # Nếu sếp nhập "Kem, Sua" -> List là ["Kem", "Sua"]
+            KEYWORD_GROUPS = [k.strip() for k in keyword.split(',') if k.strip()]
+            stats_by_keyword = {k: {'spend':0, 'revenue':0, 'data':0, 'orders':0, 'view100':0, 'reach':0} for k in KEYWORD_GROUPS}
 
             # --- 2. KẾT NỐI SHEET ---
             yield f"<div class='log info'>[SHEET] Connecting...</div>"
@@ -136,7 +141,8 @@ def lay_data_fb():
             HEADERS = [
                 "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Thời gian", 
                 "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS",
-                "ThruPlay", "View 25% (Số)", "View 25% (Tỉ lệ)", "View 100% (Số)", "View 100% (Tỉ lệ)"
+                "Lượt mua", "AOV", "Rev/Data", 
+                "ThruPlay", "View 25% (Số)", "View 100% (Số)"
             ]
             
             try:
@@ -149,13 +155,13 @@ def lay_data_fb():
 
             # --- 3. QUÉT DỮ LIỆU ---
             grand_total = {
-                'spend': 0, 'revenue': 0, 'data': 0, 'reach': 0,
+                'spend': 0, 'revenue': 0, 'data': 0, 'reach': 0, 'orders': 0,
                 'thruplay': 0, 'view25': 0, 'view100': 0
             }
             tong_hop_tk = {}
             BUFFER_ROWS = [] 
             
-            # --- CẤU HÌNH QUAN TRỌNG: GỌI ĐÍCH DANH CHỈ SỐ VIDEO ---
+            # Gọi đích danh chỉ số Video
             fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
             fields_list = f'name,status,{time_param}{{spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
@@ -171,8 +177,8 @@ def lay_data_fb():
                 
                 if ten_tk not in tong_hop_tk:
                     tong_hop_tk[ten_tk] = {
-                        'id': id_tk, 'spend': 0, 'revenue': 0, 'data': 0, 'reach': 0, 'camp_count': 0,
-                        'view25': 0, 'view100': 0
+                        'id': id_tk, 'spend': 0, 'revenue': 0, 'data': 0, 'reach': 0, 'camp_count': 0, 'orders': 0,
+                        'view25': 0, 'view100': 0, 'thruplay': 0
                     }
 
                 yield f"<div class='log info'>[SCAN] Scanning <b>{ten_tk}</b>...</div>"
@@ -197,12 +203,12 @@ def lay_data_fb():
                     except: break
 
                 count_camp = 0
-                debug_shown = False # Chỉ hiện debug cho camp đầu tiên để đỡ rối
                 
                 for camp in all_campaigns:
                     ten_camp = camp.get('name', 'Không tên')
                     trang_thai = camp.get('status', 'UNKNOWN')
                     
+                    # Kiểm tra logic chung (để lọc xem có lấy camp này ko)
                     if check_keyword_v12(ten_camp, keyword):
                         insights = camp.get('insights', {}).get('data', [])
                         if insights:
@@ -214,57 +220,65 @@ def lay_data_fb():
                                 actions = stat.get('actions', [])
                                 action_values = stat.get('action_values', [])
 
-                                # --- DEBUG ACTION KEYS (Để bắt bệnh nếu = 0) ---
-                                if not debug_shown and actions:
-                                    keys_found = [x.get('action_type') for x in actions]
-                                    yield f"<div class='log debug'>[DEBUG] {ten_tk} keys: {str(keys_found)}</div>"
-                                    debug_shown = True
-
-                                # Data & Revenue
+                                # Metrics
                                 cmts = get_fb_value(actions, ['comment'])
                                 msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
                                 total_data = cmts + msgs
                                 revenue = get_fb_value(action_values, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
+                                orders = get_fb_value(actions, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
                                 
-                                # --- LẤY CHỈ SỐ VIDEO (ƯU TIÊN LẤY TỪ ACTIONS CHUNG) ---
+                                # Video
                                 thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
+                                if thruplay == 0: thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
+                                
                                 view25 = get_fb_value(actions, ['video_p25_watched_actions'])
+                                if view25 == 0: view25 = get_fb_value(stat.get('video_p25_watched_actions', []), ['video_view', 'video_play'])
+                                
                                 view100 = get_fb_value(actions, ['video_p100_watched_actions'])
-                                
-                                # --- NẾU VẪN = 0, THỬ TÌM TRONG TRƯỜNG RIÊNG (CƠ CHẾ VÉT CẠN) ---
-                                if thruplay == 0:
-                                    # Khi gọi riêng, nó trả về list: [{'action_type': 'video_view', 'value': '123'}]
-                                    thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
-                                if view25 == 0:
-                                    view25 = get_fb_value(stat.get('video_p25_watched_actions', []), ['video_view', 'video_play'])
-                                if view100 == 0:
-                                    view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
+                                if view100 == 0: view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
 
-                                # Tính toán Rate
-                                rate25 = (view25 / reach) if reach > 0 else 0
-                                rate100 = (view100 / reach) if reach > 0 else 0
-                                
+                                # Calculated
                                 gia_data = round(spend / total_data) if total_data > 0 else 0
                                 roas = (revenue / spend) if spend > 0 else 0
+                                aov = round(revenue / orders) if orders > 0 else 0
+                                rev_per_data = round(revenue / total_data) if total_data > 0 else 0
                                 
+                                # --- PHÂN LOẠI VÀO NHÓM TỪ KHÓA ---
+                                for kw_group in KEYWORD_GROUPS:
+                                    # Dùng check_keyword_v12 để kiểm tra xem camp này có thuộc nhóm từ khóa này không
+                                    if check_keyword_v12(ten_camp, kw_group):
+                                        stats_by_keyword[kw_group]['spend'] += spend
+                                        stats_by_keyword[kw_group]['revenue'] += revenue
+                                        stats_by_keyword[kw_group]['data'] += total_data
+                                        stats_by_keyword[kw_group]['orders'] += orders
+                                        stats_by_keyword[kw_group]['view100'] += view100
+                                        stats_by_keyword[kw_group]['reach'] += reach
+
+                                # Buffer Sheet
                                 row = [
                                     id_tk, ten_tk, ten_camp, trang_thai, thoi_gian_bao_cao, 
                                     spend, reach, total_data, gia_data, revenue, roas,
-                                    thruplay, view25, rate25, view100, rate100
+                                    orders, aov, rev_per_data,
+                                    thruplay, view25, view100
                                 ]
                                 BUFFER_ROWS.append(row)
                                 
+                                # Sum TK
                                 tong_hop_tk[ten_tk]['spend'] += spend
                                 tong_hop_tk[ten_tk]['revenue'] += revenue
                                 tong_hop_tk[ten_tk]['data'] += total_data
+                                tong_hop_tk[ten_tk]['orders'] += orders
                                 tong_hop_tk[ten_tk]['reach'] += reach
-                                tong_hop_tk[ten_tk]['camp_count'] += 1
+                                tong_hop_tk[ten_tk]['thruplay'] += thruplay
                                 tong_hop_tk[ten_tk]['view25'] += view25
                                 tong_hop_tk[ten_tk]['view100'] += view100
+                                tong_hop_tk[ten_tk]['camp_count'] += 1
                                 
+                                # Grand Total
                                 grand_total['spend'] += spend
                                 grand_total['revenue'] += revenue
                                 grand_total['data'] += total_data
+                                grand_total['orders'] += orders
                                 grand_total['reach'] += reach
                                 grand_total['thruplay'] += thruplay
                                 grand_total['view25'] += view25
@@ -272,7 +286,7 @@ def lay_data_fb():
                                 
                                 count_camp += 1
                 
-                yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp} camps matched.</div>"
+                yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp} camps.</div>"
                 yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
             if BUFFER_ROWS:
@@ -282,59 +296,77 @@ def lay_data_fb():
                     yield f"<div class='log success'>[SUCCESS] Saved!</div>"
                 except Exception as e:
                     yield f"<div class='log error'>[FATAL] Sheet Error: {str(e)}</div>"
-            else:
-                yield f"<div class='log info'>No data found.</div>"
 
-            g_reach = grand_total['reach']
-            g_view25 = grand_total['view25']
-            g_view100 = grand_total['view100']
+            # --- RENDER BÁO CÁO ---
+            yield "<div class='final-section'>"
             
-            g_rate25 = (g_view25 / g_reach * 100) if g_reach > 0 else 0
+            # 1. BẢNG SO SÁNH TỪ KHÓA (NẾU CÓ NHIỀU TỪ KHÓA)
+            if len(KEYWORD_GROUPS) > 0:
+                yield "<h2>🔍 SO SÁNH HIỆU QUẢ TỪ KHÓA</h2>"
+                yield "<table><thead><tr><th>Từ Khóa</th><th>Tiêu</th><th>Data</th><th>Giá Data</th><th>Đơn</th><th>Doanh Thu</th><th>ROAS</th><th>View 100%</th></tr></thead><tbody>"
+                for kw, val in stats_by_keyword.items():
+                    cpa_kw = round(val['spend'] / val['data']) if val['data'] > 0 else 0
+                    roas_kw = (val['revenue'] / val['spend']) if val['spend'] > 0 else 0
+                    
+                    # Highlight dòng nào hiệu quả (ROAS > 1.5)
+                    style_row = "background:#1f2937" if roas_kw > 1.5 else ""
+                    
+                    yield f"""
+                    <tr style='{style_row}'>
+                        <td><span class='highlight'>{kw}</span></td>
+                        <td align='right'>{fmt_vn(val['spend'])}</td>
+                        <td align='center'>{fmt_vn(val['data'])}</td>
+                        <td align='right'>{fmt_vn(cpa_kw)}</td>
+                        <td align='center'>{fmt_vn(val['orders'])}</td>
+                        <td align='right'>{fmt_vn(val['revenue'])}</td>
+                        <td align='center' style='color:{'#3fb950' if roas_kw > 1 else '#ff7b72'}'><b>{roas_kw:.2f}</b></td>
+                        <td align='right'>{fmt_vn(val['view100'])}</td>
+                    </tr>
+                    """
+                yield "</tbody></table>"
+
+            # 2. BÁO CÁO TỔNG QUAN TÀI KHOẢN (FULL COLUMNS)
+            g_reach = grand_total['reach']
+            g_view100 = grand_total['view100']
             g_rate100 = (g_view100 / g_reach * 100) if g_reach > 0 else 0
             
             yield f"""
-            <div class='final-section'>
-                <h2 style='color:#f0f6fc; margin-bottom: 20px;'>BÁO CÁO V18 (VIDEO DEEP SCAN)</h2>
-                
-                <div class='kpi-box'>
-                    <div class='kpi-card'><div class='kpi-title'>💰 Tổng Tiêu</div><div class='kpi-value' style='color:#ff7b72'>{fmt_vn(grand_total['spend'])}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>💎 Doanh Thu</div><div class='kpi-value' style='color:#3fb950'>{fmt_vn(grand_total['revenue'])}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>👀 Tổng Reach</div><div class='kpi-value'>{fmt_vn(g_reach)}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>▶️ ThruPlay</div><div class='kpi-value'>{fmt_vn(grand_total['thruplay'])}</div></div>
-                </div>
-
-                <div class='kpi-box'>
-                    <div class='kpi-card'>
-                        <div class='kpi-title'>📉 View 25% (Rate)</div>
-                        <div class='kpi-value'>{fmt_vn(g_view25)} <span style='font-size:14px; color:#a5d6ff'>({g_rate25:.2f}%)</span></div>
-                    </div>
-                    <div class='kpi-card'>
-                        <div class='kpi-title'>🎯 View 100% (Rate)</div>
-                        <div class='kpi-value'>{fmt_vn(g_view100)} <span style='font-size:14px; color:#a5d6ff'>({g_rate100:.2f}%)</span></div>
-                    </div>
-                </div>
-                
-                <table>
-                    <thead><tr><th>Tên TK</th><th>Tiêu</th><th>Data</th><th>Rev</th><th>Reach</th><th>View 25% (Tỉ lệ)</th><th>View 100% (Tỉ lệ)</th></tr></thead>
-                    <tbody>
+            <h2>📊 TỔNG QUAN TÀI KHOẢN</h2>
+            <div class='kpi-box'>
+                <div class='kpi-card'><div class='kpi-title'>💰 Tổng Tiêu</div><div class='kpi-value' style='color:#ff7b72'>{fmt_vn(grand_total['spend'])}</div></div>
+                <div class='kpi-card'><div class='kpi-title'>💎 Doanh Thu</div><div class='kpi-value' style='color:#3fb950'>{fmt_vn(grand_total['revenue'])}</div></div>
+                <div class='kpi-card'><div class='kpi-title'>📩 Tổng Data</div><div class='kpi-value'>{fmt_vn(grand_total['data'])}</div></div>
+                <div class='kpi-card'><div class='kpi-title'>🛒 Tổng Đơn</div><div class='kpi-value'>{fmt_vn(grand_total['orders'])}</div></div>
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tên TK</th><th>Tiêu</th><th>Data</th><th>Giá Data</th>
+                        <th>Đơn</th><th>AOV</th><th>Rev/Data</th>
+                        <th>Doanh Thu</th><th>ROAS</th><th>ThruPlay</th>
+                    </tr>
+                </thead>
+                <tbody>
             """
             for ten, val in tong_hop_tk.items():
-                r_reach = val['reach']
-                r_v25 = val['view25']
-                r_v100 = val['view100']
-                
-                rate_v25 = (r_v25 / r_reach * 100) if r_reach > 0 else 0
-                rate_v100 = (r_v100 / r_reach * 100) if r_reach > 0 else 0
+                cpa = round(val['spend'] / val['data']) if val['data'] > 0 else 0
+                roas = (val['revenue'] / val['spend']) if val['spend'] > 0 else 0
+                aov = round(val['revenue'] / val['orders']) if val['orders'] > 0 else 0
+                rev_per_data = round(val['revenue'] / val['data']) if val['data'] > 0 else 0
                 
                 yield f"""
                     <tr>
                         <td><span class='highlight'>{ten}</span></td>
                         <td align='right'>{fmt_vn(val['spend'])}</td>
                         <td align='center'>{fmt_vn(val['data'])}</td>
+                        <td align='right'>{fmt_vn(cpa)}</td>
+                        <td align='center'>{fmt_vn(val['orders'])}</td>
+                        <td align='right'>{fmt_vn(aov)}</td>
+                        <td align='right'>{fmt_vn(rev_per_data)}</td>
                         <td align='right'>{fmt_vn(val['revenue'])}</td>
-                        <td align='center'>{fmt_vn(r_reach)}</td>
-                        <td align='right'>{fmt_vn(r_v25)} <small>({rate_v25:.1f}%)</small></td>
-                        <td align='right'>{fmt_vn(r_v100)} <small>({rate_v100:.1f}%)</small></td>
+                        <td align='center' style='color:{'#3fb950' if roas > 1 else '#ff7b72'}'><b>{roas:.2f}</b></td>
+                        <td align='right'>{fmt_vn(val['thruplay'])}</td>
                     </tr>
                 """
             yield """</tbody></table></div><script>window.scrollTo(0, document.body.scrollHeight);</script>"""
