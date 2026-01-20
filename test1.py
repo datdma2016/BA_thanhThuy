@@ -4,7 +4,7 @@ import json
 import traceback
 import shlex
 import time
-import random # <--- Thêm thư viện để tạo số ngẫu nhiên
+import random
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask, request, jsonify, Response, stream_with_context
 from datetime import datetime, timedelta
@@ -75,12 +75,11 @@ def check_keyword_v12(ten_camp, keyword_string):
 
 @app.route('/')
 def home():
-    return "<h1>Bot V16: HUMAN MODE - Anti-Ban & Full Metrics!</h1>"
+    return "<h1>Bot V17: Video Metrics Pro - Rate % Calculated!</h1>"
 
 @app.route('/fb-ads')
 def lay_data_fb():
     def generate():
-        # --- GIAO DIỆN HACKER UI ---
         yield """
         <style>
             body { background-color: #0d1117; color: #c9d1d9; font-family: 'Consolas', monospace; padding: 20px; font-size: 13px; }
@@ -89,7 +88,7 @@ def lay_data_fb():
             .error { color: #f85149; }
             .warning { color: #d29922; }
             .info { color: #8b949e; }
-            .sleep { color: #d2a8ff; font-style: italic; } /* Màu tím cho trạng thái ngủ */
+            .sleep { color: #d2a8ff; font-style: italic; }
             .highlight { color: #58a6ff; font-weight: bold; }
             
             table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #161b22; font-size: 12px; }
@@ -104,13 +103,13 @@ def lay_data_fb():
             
             .final-section { background: #0d1117; border-top: 2px solid #30363d; margin-top: 30px; padding-top: 20px; }
         </style>
-        <h3>> KHỞI ĐỘNG CHẾ ĐỘ 'HUMAN MODE' (V16)...</h3>
+        <h3>> KHỞI ĐỘNG V17 (VIDEO METRICS PRO)...</h3>
         """
         
         try:
             # --- 1. LẤY THAM SỐ ---
             keyword = request.args.get('keyword', '')
-            ten_tab = request.args.get('sheet', 'BaoCaoV16_Human')
+            ten_tab = request.args.get('sheet', 'BaoCaoV17_Video')
             start_date = request.args.get('start')
             end_date = request.args.get('end')
             date_preset = request.args.get('date', 'today')
@@ -126,40 +125,41 @@ def lay_data_fb():
             yield f"<div class='log info'>[INIT] Config: Tab='{ten_tab}' | Key='{keyword}'</div>"
 
             # --- 2. KẾT NỐI SHEET ---
-            yield f"<div class='log info'>[SHEET] Connecting to Google Sheet...</div>"
+            yield f"<div class='log info'>[SHEET] Connecting...</div>"
             scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
             creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
             client = gspread.authorize(creds)
             sh = client.open(FILE_SHEET_GOC)
             
+            # HEADER MỚI: Thêm cột Tỉ lệ %
             HEADERS = [
                 "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Thời gian", 
-                "Tiền tiêu", "Reach", "Data (Mess+Cmt)", "Giá Data", "Doanh Thu (Rev)", "ROAS",
-                "Lượt mua (Orders)", "AOV (Rev/Order)", "Rev/Data", 
-                "ThruPlay", "View 25%", "View 100%"
+                "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS",
+                "ThruPlay", "View 25% (Số)", "View 25% (Tỉ lệ)", "View 100% (Số)", "View 100% (Tỉ lệ)"
             ]
             
             try:
                 worksheet = sh.worksheet(ten_tab)
                 yield f"<div class='log success'>[SHEET] Found tab '{ten_tab}'.</div>"
             except:
-                yield f"<div class='log warning'>[SHEET] Creating new tab '{ten_tab}'...</div>"
+                yield f"<div class='log warning'>[SHEET] Creating new tab...</div>"
                 worksheet = sh.add_worksheet(title=ten_tab, rows=100, cols=20)
                 worksheet.append_row(HEADERS)
 
             # --- 3. QUÉT DỮ LIỆU ---
-            grand_total = {'spend': 0, 'revenue': 0, 'data': 0, 'orders': 0, 'thruplay': 0, 'view25': 0, 'view100': 0}
+            grand_total = {
+                'spend': 0, 'revenue': 0, 'data': 0, 'reach': 0,
+                'thruplay': 0, 'view25': 0, 'view100': 0
+            }
             tong_hop_tk = {}
             BUFFER_ROWS = [] 
             
             fields_list = f'name,status,{time_param}{{spend,reach,actions,action_values,purchase_roas}}'
 
             for i, tk_obj in enumerate(DANH_SACH_TKQC):
-                # --- [AN TOÀN] SLEEP GIỮA CÁC TÀI KHOẢN ---
-                if i > 0: # Không sleep trước tài khoản đầu tiên
-                    # Random nghỉ từ 3 đến 8 giây
-                    sleep_time = random.uniform(3, 8) 
-                    yield f"<div class='log sleep'>[SLEEP] Nghỉ {sleep_time:.1f}s trước khi qua TK tiếp theo...</div>"
+                if i > 0: 
+                    sleep_time = random.uniform(3, 6) 
+                    yield f"<div class='log sleep'>[SLEEP] Nghỉ {sleep_time:.1f}s...</div>"
                     yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
                     time.sleep(sleep_time)
 
@@ -167,7 +167,10 @@ def lay_data_fb():
                 ten_tk = tk_obj['name']
                 
                 if ten_tk not in tong_hop_tk:
-                    tong_hop_tk[ten_tk] = {'id': id_tk, 'spend': 0, 'revenue': 0, 'data': 0, 'orders': 0, 'camp_count': 0}
+                    tong_hop_tk[ten_tk] = {
+                        'id': id_tk, 'spend': 0, 'revenue': 0, 'data': 0, 'reach': 0, 'camp_count': 0,
+                        'view25': 0, 'view100': 0
+                    }
 
                 yield f"<div class='log info'>[SCAN] Scanning <b>{ten_tk}</b>...</div>"
                 
@@ -176,26 +179,15 @@ def lay_data_fb():
                 
                 all_campaigns = []
                 next_url = base_url
-                page_count = 0
                 
                 while True:
                     try:
-                        # --- [AN TOÀN] SLEEP KHI LẬT TRANG ---
-                        if page_count > 0:
-                            # Nghỉ nhẹ 1-2 giây khi lật trang
-                            time.sleep(random.uniform(1, 2.5))
-                            
                         res = requests.get(next_url, params=params if next_url == base_url else None)
                         data = res.json()
-                        
                         if 'error' in data:
                             yield f"<div class='log error'>[ERROR] TK {ten_tk}: {data['error']['message']}</div>"
                             break
-                        
-                        batch = data.get('data', [])
-                        all_campaigns.extend(batch)
-                        page_count += 1
-                        
+                        all_campaigns.extend(data.get('data', []))
                         if 'paging' in data and 'next' in data['paging']:
                             next_url = data['paging']['next']
                         else: break
@@ -218,35 +210,45 @@ def lay_data_fb():
                                 actions = stat.get('actions', [])
                                 action_values = stat.get('action_values', [])
 
+                                # Data & Revenue
                                 cmts = get_fb_value(actions, ['comment'])
                                 msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
                                 total_data = cmts + msgs
-                                
                                 revenue = get_fb_value(action_values, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
-                                orders = get_fb_value(actions, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
                                 
+                                # --- VIDEO METRICS (CHUẨN API KEY) ---
                                 thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
-                                view25 = get_fb_value(actions, ['video_p25_watched_actions'])
-                                view100 = get_fb_value(actions, ['video_p100_watched_actions'])
+                                view25 = get_fb_value(actions, ['video_p25_watched_actions']) # Đúng key 25%
+                                view100 = get_fb_value(actions, ['video_p100_watched_actions']) # Đúng key 100%
+                                
+                                # Tính toán Rate (Dựa trên Reach)
+                                rate25 = (view25 / reach) if reach > 0 else 0
+                                rate100 = (view100 / reach) if reach > 0 else 0
                                 
                                 gia_data = round(spend / total_data) if total_data > 0 else 0
                                 roas = (revenue / spend) if spend > 0 else 0
-                                aov = round(revenue / orders) if orders > 0 else 0
-                                rev_per_data = round(revenue / total_data) if total_data > 0 else 0
                                 
-                                row = [id_tk, ten_tk, ten_camp, trang_thai, thoi_gian_bao_cao, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100]
+                                # Lưu vào Sheet (Có thêm cột Rate)
+                                row = [
+                                    id_tk, ten_tk, ten_camp, trang_thai, thoi_gian_bao_cao, 
+                                    spend, reach, total_data, gia_data, revenue, roas,
+                                    thruplay, view25, rate25, view100, rate100
+                                ]
                                 BUFFER_ROWS.append(row)
                                 
+                                # Cộng dồn tổng
                                 tong_hop_tk[ten_tk]['spend'] += spend
                                 tong_hop_tk[ten_tk]['revenue'] += revenue
                                 tong_hop_tk[ten_tk]['data'] += total_data
-                                tong_hop_tk[ten_tk]['orders'] += orders
+                                tong_hop_tk[ten_tk]['reach'] += reach
                                 tong_hop_tk[ten_tk]['camp_count'] += 1
+                                tong_hop_tk[ten_tk]['view25'] += view25
+                                tong_hop_tk[ten_tk]['view100'] += view100
                                 
                                 grand_total['spend'] += spend
                                 grand_total['revenue'] += revenue
                                 grand_total['data'] += total_data
-                                grand_total['orders'] += orders
+                                grand_total['reach'] += reach
                                 grand_total['thruplay'] += thruplay
                                 grand_total['view25'] += view25
                                 grand_total['view100'] += view100
@@ -258,54 +260,69 @@ def lay_data_fb():
 
             # --- 4. GHI SHEET ---
             if BUFFER_ROWS:
-                yield f"<div class='log warning'>[WRITE] Writing {len(BUFFER_ROWS)} rows to Sheet...</div>"
+                yield f"<div class='log warning'>[WRITE] Writing {len(BUFFER_ROWS)} rows...</div>"
                 try:
                     worksheet.append_rows(BUFFER_ROWS)
-                    yield f"<div class='log success'>[SUCCESS] Data saved successfully!</div>"
+                    yield f"<div class='log success'>[SUCCESS] Saved!</div>"
                 except Exception as e:
                     yield f"<div class='log error'>[FATAL] Sheet Error: {str(e)}</div>"
             else:
-                yield f"<div class='log info'>No data found matching keyword.</div>"
+                yield f"<div class='log info'>No data found.</div>"
 
-            # --- 5. HIỂN THỊ KPI TỔNG QUAN ---
-            g_spend = grand_total['spend']
-            g_rev = grand_total['revenue']
-            g_data = grand_total['data']
-            g_orders = grand_total['orders']
+            # --- 5. TÍNH TOÁN KPI TỔNG ---
+            g_reach = grand_total['reach']
+            g_view25 = grand_total['view25']
+            g_view100 = grand_total['view100']
             
-            g_roas = (g_rev / g_spend) if g_spend > 0 else 0
-            g_cpa = (g_spend / g_data) if g_data > 0 else 0
-            g_aov = (g_rev / g_orders) if g_orders > 0 else 0
-            g_rev_data = (g_rev / g_data) if g_data > 0 else 0
+            # Tính Rate Tổng
+            g_rate25 = (g_view25 / g_reach * 100) if g_reach > 0 else 0
+            g_rate100 = (g_view100 / g_reach * 100) if g_reach > 0 else 0
             
             yield f"""
             <div class='final-section'>
-                <h2 style='color:#f0f6fc; margin-bottom: 20px;'>BÁO CÁO TỔNG QUAN (V16 - HUMAN MODE)</h2>
+                <h2 style='color:#f0f6fc; margin-bottom: 20px;'>BÁO CÁO V17 (VIDEO PRO)</h2>
+                
                 <div class='kpi-box'>
-                    <div class='kpi-card'><div class='kpi-title'>💰 Tổng Tiêu</div><div class='kpi-value' style='color:#ff7b72'>{fmt_vn(g_spend)}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>💎 Doanh Thu</div><div class='kpi-value' style='color:#3fb950'>{fmt_vn(g_rev)}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>📈 ROAS</div><div class='kpi-value' style='color:#a5d6ff'>{g_roas:.2f}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>🛒 Tổng Lượt Mua</div><div class='kpi-value'>{fmt_vn(g_orders)}</div></div>
-                </div>
-                <div class='kpi-box'>
-                    <div class='kpi-card'><div class='kpi-title'>📩 Tổng Data</div><div class='kpi-value'>{fmt_vn(g_data)}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>💸 Giá Data TB</div><div class='kpi-value'>{fmt_vn(g_cpa)}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>📦 AOV (Giá trị ĐH)</div><div class='kpi-value'>{fmt_vn(g_aov)}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>💵 Rev/Data</div><div class='kpi-value'>{fmt_vn(g_rev_data)}</div></div>
-                </div>
-                <div class='kpi-box'>
+                    <div class='kpi-card'><div class='kpi-title'>💰 Tổng Tiêu</div><div class='kpi-value' style='color:#ff7b72'>{fmt_vn(grand_total['spend'])}</div></div>
+                    <div class='kpi-card'><div class='kpi-title'>💎 Doanh Thu</div><div class='kpi-value' style='color:#3fb950'>{fmt_vn(grand_total['revenue'])}</div></div>
+                    <div class='kpi-card'><div class='kpi-title'>👀 Tổng Reach</div><div class='kpi-value'>{fmt_vn(g_reach)}</div></div>
                     <div class='kpi-card'><div class='kpi-title'>▶️ ThruPlay</div><div class='kpi-value'>{fmt_vn(grand_total['thruplay'])}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>👀 Xem 25%</div><div class='kpi-value'>{fmt_vn(grand_total['view25'])}</div></div>
-                    <div class='kpi-card'><div class='kpi-title'>💯 Xem 100%</div><div class='kpi-value'>{fmt_vn(grand_total['view100'])}</div></div>
                 </div>
+
+                <div class='kpi-box'>
+                    <div class='kpi-card'>
+                        <div class='kpi-title'>📉 View 25% (Rate)</div>
+                        <div class='kpi-value'>{fmt_vn(g_view25)} <span style='font-size:14px; color:#a5d6ff'>({g_rate25:.2f}%)</span></div>
+                    </div>
+                    <div class='kpi-card'>
+                        <div class='kpi-title'>🎯 View 100% (Rate)</div>
+                        <div class='kpi-value'>{fmt_vn(g_view100)} <span style='font-size:14px; color:#a5d6ff'>({g_rate100:.2f}%)</span></div>
+                    </div>
+                </div>
+                
                 <table>
-                    <thead><tr><th>Tên TK</th><th>Camp</th><th>Tiêu</th><th>Data</th><th>Giá Data</th><th>Đơn</th><th>Doanh Thu</th><th>ROAS</th></tr></thead>
+                    <thead><tr><th>Tên TK</th><th>Tiêu</th><th>Data</th><th>Rev</th><th>Reach</th><th>View 25% (Tỉ lệ)</th><th>View 100% (Tỉ lệ)</th></tr></thead>
                     <tbody>
             """
             for ten, val in tong_hop_tk.items():
-                cpa = round(val['spend'] / val['data']) if val['data'] > 0 else 0
-                roas = (val['revenue'] / val['spend']) if val['spend'] > 0 else 0
-                yield f"""<tr><td><span class='highlight'>{ten}</span></td><td align='center'>{val['camp_count']}</td><td align='right'>{fmt_vn(val['spend'])}</td><td align='center'>{fmt_vn(val['data'])}</td><td align='right'>{fmt_vn(cpa)}</td><td align='center'>{fmt_vn(val['orders'])}</td><td align='right'>{fmt_vn(val['revenue'])}</td><td align='center' style='color:{'#3fb950' if roas > 1 else '#ff7b72'}'><b>{roas:.2f}</b></td></tr>"""
+                r_reach = val['reach']
+                r_v25 = val['view25']
+                r_v100 = val['view100']
+                
+                rate_v25 = (r_v25 / r_reach * 100) if r_reach > 0 else 0
+                rate_v100 = (r_v100 / r_reach * 100) if r_reach > 0 else 0
+                
+                yield f"""
+                    <tr>
+                        <td><span class='highlight'>{ten}</span></td>
+                        <td align='right'>{fmt_vn(val['spend'])}</td>
+                        <td align='center'>{fmt_vn(val['data'])}</td>
+                        <td align='right'>{fmt_vn(val['revenue'])}</td>
+                        <td align='center'>{fmt_vn(r_reach)}</td>
+                        <td align='right'>{fmt_vn(r_v25)} <small>({rate_v25:.1f}%)</small></td>
+                        <td align='right'>{fmt_vn(r_v100)} <small>({rate_v100:.1f}%)</small></td>
+                    </tr>
+                """
             yield """</tbody></table></div><script>window.scrollTo(0, document.body.scrollHeight);</script>"""
 
         except Exception as e:
