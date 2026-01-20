@@ -31,29 +31,36 @@ DANH_SACH_TKQC = [
 ]
 
 # ======================================================
-# CSS GIAO DIỆN (Đen huyền bí)
+# CSS GIAO DIỆN (Đen huyền bí & Log chi tiết)
 # ======================================================
 CSS_STYLE = """
 <style>
-    body { background-color: #0d1117; color: #c9d1d9; font-family: 'Consolas', monospace; padding: 20px; font-size: 13px; }
-    .log-entry { border-bottom: 1px solid #21262d; padding: 2px 0; }
+    body { background-color: #0d1117; color: #c9d1d9; font-family: 'Consolas', monospace; padding: 20px; font-size: 12px; }
+    .log-line { border-bottom: 1px solid #21262d; padding: 2px 0; white-space: pre-wrap; word-wrap: break-word;}
     .success { color: #3fb950; }
     .error { color: #f85149; }
     .warning { color: #d29922; }
     .info { color: #8b949e; }
     .highlight { color: #58a6ff; font-weight: bold; }
+    .page-tag { background: #1f6feb; color: white; padding: 1px 4px; border-radius: 3px; font-size: 10px; margin-right: 5px;}
     .status-bar { 
         position: fixed; top: 0; left: 0; right: 0; 
         background: #161b22; border-bottom: 1px solid #30363d; 
         padding: 10px; font-weight: bold; font-size: 14px; color: #e3b341;
         text-align: center; z-index: 999;
     }
-    .content { margin-top: 50px; }
-    .download-msg { 
-        background: #238636; color: white; padding: 15px; 
-        border-radius: 6px; margin-top: 20px; text-align: center; 
-        font-size: 16px; font-weight: bold; display: none;
+    .content { margin-top: 50px; margin-bottom: 100px; }
+    .download-area { 
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: #161b22; border-top: 1px solid #30363d;
+        padding: 15px; text-align: center; z-index: 999;
     }
+    .btn { 
+        background: #238636; color: white; padding: 10px 20px; 
+        text-decoration: none; border-radius: 5px; font-weight: bold; cursor: pointer;
+        border: none; font-size: 14px;
+    }
+    .btn:disabled { background: #484f58; cursor: not-allowed; }
 </style>
 """
 
@@ -71,18 +78,13 @@ def get_fb_value(data_list, keys_target, value_key='value'):
 def check_keyword_v12(ten_camp, keyword_string):
     if not keyword_string: return True
     ten_camp_lower = ten_camp.lower()
-    
-    # Xử lý parse từ khóa an toàn hơn để tránh lỗi 500
     try:
         or_groups = keyword_string.split(',') 
-    except:
-        return False
+    except: return False
 
     for group in or_groups:
-        try:
-            terms = shlex.split(group)
-        except:
-            terms = group.split() # Fallback nếu shlex lỗi
+        try: terms = shlex.split(group)
+        except: terms = group.split()
             
         match_group = True
         for term in terms:
@@ -92,19 +94,17 @@ def check_keyword_v12(ten_camp, keyword_string):
             tim_thay = tu_khoa_chuan in ten_camp_lower
             if is_negative:
                 if tim_thay:
-                    match_group = False
-                    break
+                    match_group = False; break
             else:
                 if not tim_thay:
-                    match_group = False
-                    break
+                    match_group = False; break
         if match_group: return True 
     return False 
 
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V40: Streaming Download (Anti-Timeout)</h1>
+    <h1>Bot V41: Live Streaming Download (Full Log)</h1>
     <ul>
         <li><a href='/fb-download'>/fb-download</a></li>
     </ul>
@@ -113,85 +113,109 @@ def home():
 @app.route('/fb-download')
 def download_data_ngay():
     def generate():
-        # Gửi Header HTML ngay lập tức để giữ kết nối
+        # Gửi Header HTML
         yield f"<html><head>{CSS_STYLE}</head><body>"
         
-        try:
-            args = request.args.to_dict()
-            keyword = args.get('keyword', '')
-            start_date_str = args.get('start')
+        args = request.args.to_dict()
+        keyword = args.get('keyword', '')
+        start_date_str = args.get('start')
+        
+        if not start_date_str:
+            yield "<div class='error'>❌ LỖI: Thiếu ngày bắt đầu (?start=...)</div></body></html>"
+            return
+
+        yield f"<div class='status-bar'>ĐANG XỬ LÝ: {start_date_str}</div>"
+        yield "<div class='content' id='logArea'>"
+        
+        # --- JS ĐỂ HỨNG DỮ LIỆU ---
+        # Chúng ta sẽ dùng mảng JS để gom dữ liệu thay vì server gom
+        yield """
+        <script>
+            var csvData = [];
+            // Hàm thêm dòng vào CSV
+            function addRow(rowString) {
+                csvData.push(rowString);
+            }
             
-            if not start_date_str:
-                yield "<div class='error'>❌ LỖI: Thiếu ngày bắt đầu (?start=...)</div></body></html>"
-                return
+            // Hàm tải file
+            function downloadCSV(filename) {
+                var blob = new Blob([csvData.join("\\n")], { type: 'text/csv;charset=utf-8;' });
+                var link = document.createElement("a");
+                var url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        </script>
+        """
 
-            yield f"<div class='status-bar'>ĐANG XỬ LÝ NGÀY: {start_date_str}</div>"
-            yield "<div class='content'>"
+        # Header CSV
+        HEADERS = ["Ngày", "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS", "Lượt mua", "AOV", "Rev/Data", "ThruPlay", "View 25%", "View 100%", "Từ khóa (Tag)"]
+        # Gửi header xuống JS ngay lập tức
+        header_str = ",".join(HEADERS)
+        yield f"<script>addRow('{header_str}');</script>"
 
-            # --- BẮT ĐẦU XỬ LÝ LOGIC ---
-            # Chuẩn bị CSV Header
-            csv_output = io.StringIO()
-            writer = csv.writer(csv_output)
-            HEADERS = ["Ngày", "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS", "Lượt mua", "AOV", "Rev/Data", "ThruPlay", "View 25%", "View 100%", "Từ khóa (Tag)"]
-            writer.writerow(HEADERS)
+        # Params Facebook
+        KEYWORD_GROUPS = [k.strip() for k in keyword.split(',') if k.strip()]
+        range_dict = {'since': start_date_str, 'until': start_date_str}
+        time_str = f'insights.time_range({json.dumps(range_dict)})'
+        fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
+        fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
+
+        total_rows_day = 0
+
+        # DUYỆT TÀI KHOẢN
+        for i, tk_obj in enumerate(DANH_SACH_TKQC):
+            if i > 0: time.sleep(1) # Nghỉ nhẹ
             
-            KEYWORD_GROUPS = [k.strip() for k in keyword.split(',') if k.strip()]
-            range_dict = {'since': start_date_str, 'until': start_date_str}
-            time_str = f'insights.time_range({json.dumps(range_dict)})'
-            fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
-            fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
+            id_tk = tk_obj['id']
+            ten_tk = tk_obj['name']
+            
+            yield f"<div class='log-line'>Scanning <b class='highlight'>{ten_tk}</b>...</div>"
+            yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
-            total_rows = 0
+            base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
+            params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500} # Lấy 500
+            
+            next_url = base_url
+            page_num = 0
+            
+            # VÒNG LẶP TRANG (PAGING)
+            while True:
+                page_num += 1
+                yield f"<div class='log-line info'> &nbsp;&nbsp; ↳ <span class='page-tag'>Page {page_num}</span> Đang tải từ Facebook...</div>"
+                yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
+                
+                # Retry Logic
+                retries = 3
+                data = None
+                while retries > 0:
+                    try:
+                        res = requests.get(next_url, params=params if next_url == base_url else None, timeout=45)
+                        data = res.json()
+                        if 'error' in data:
+                            yield f"<div class='log-line error'> &nbsp;&nbsp; ❌ LỖI API: {data['error']['message']}</div>"
+                            data = None; break
+                        break # Thành công
+                    except Exception as e:
+                        retries -= 1
+                        yield f"<div class='log-line warning'> &nbsp;&nbsp; ⚠️ Lỗi mạng, thử lại ({retries})...</div>"
+                        time.sleep(3)
+                
+                if not data: break # Nếu lỗi quá 3 lần thì bỏ qua TK này
 
-            # Duyệt từng tài khoản
-            for i, tk_obj in enumerate(DANH_SACH_TKQC):
-                # Sleep nhẹ
-                if i > 0: time.sleep(random.uniform(1, 2))
+                campaigns = data.get('data', [])
+                count_in_page = len(campaigns)
+                yield f"<div class='log-line success'> &nbsp;&nbsp; ✅ Tải xong. Tìm thấy {count_in_page} campaigns. Đang lọc...</div>"
                 
-                id_tk = tk_obj['id']
-                ten_tk = tk_obj['name']
-                yield f"<div class='log-entry'>Scan: <span class='highlight'>{ten_tk}</span>... "
-                yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>" # Cuộn xuống
+                # XỬ LÝ DỮ LIỆU NGAY LẬP TỨC (KHÔNG GOM)
+                matched_count = 0
+                csv_buffer = [] # Buffer nhỏ cho 1 trang thôi
                 
-                base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
-                params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500}
-                
-                all_campaigns = []
-                next_url = base_url
-                
-                # Vòng lặp lấy dữ liệu (Retry Logic)
-                while True:
-                    retries = 3
-                    success = False
-                    while retries > 0:
-                        try:
-                            res = requests.get(next_url, params=params if next_url == base_url else None, timeout=30)
-                            data = res.json()
-                            if 'error' in data:
-                                yield f"<span class='error'>[Err: {data['error']['message']}]</span>"
-                                retries = 0; break
-                            
-                            fetched = data.get('data', [])
-                            all_campaigns.extend(fetched)
-                            
-                            if 'paging' in data and 'next' in data['paging']:
-                                next_url = data['paging']['next']
-                                success = True; break
-                            else:
-                                next_url = None
-                                success = True; break
-                        except Exception as e:
-                            retries -= 1
-                            yield f"<span class='warning'>[Retry]</span>"
-                            time.sleep(2)
-                    
-                    if not success or not next_url: break
-                    yield "." # Dấu chấm báo hiệu đang tải trang
-                    time.sleep(0.5)
-
-                # Lọc và ghi CSV (vào bộ nhớ đệm)
-                camp_count = 0
-                for camp in all_campaigns:
+                for camp in campaigns:
                     ten_camp = camp.get('name', 'Không tên')
                     trang_thai = camp.get('status', 'UNKNOWN')
                     
@@ -200,7 +224,8 @@ def download_data_ngay():
                         if insights_data:
                             stat = insights_data[0]
                             spend = float(stat.get('spend', 0))
-                            # Logic lấy chỉ số (giữ nguyên như cũ)
+                            
+                            # Logic tính toán (giữ nguyên)
                             reach = int(stat.get('reach', 0))
                             actions = stat.get('actions', [])
                             action_values = stat.get('action_values', [])
@@ -224,74 +249,64 @@ def download_data_ngay():
                             if len(KEYWORD_GROUPS) > 0:
                                 for kw_group in KEYWORD_GROUPS:
                                     if check_keyword_v12(ten_camp, kw_group):
-                                        matched_tag = kw_group
-                                        break
+                                        matched_tag = kw_group; break
                             else: matched_tag = "All"
 
-                            row = [start_date_str, id_tk, ten_tk, ten_camp, trang_thai, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100, matched_tag]
-                            writer.writerow(row)
-                            camp_count += 1
-                            total_rows += 1
-                
-                yield f" <span class='success'>OK ({camp_count})</span></div>"
+                            # Format CSV Line (Thủ công để tránh lỗi thư viện)
+                            # Cần escape dấu phẩy trong tên chiến dịch nếu có
+                            safe_ten_tk = ten_tk.replace('"', '""')
+                            safe_ten_camp = ten_camp.replace('"', '""')
+                            
+                            # Tạo dòng CSV chuẩn
+                            row_str = f'"{start_date_str}","{id_tk}","{safe_ten_tk}","{safe_ten_camp}","{trang_thai}",{spend},{reach},{total_data},{gia_data},{revenue},{roas},{orders},{aov},{rev_per_data},{thruplay},{view25},{view100},"{matched_tag}"'
+                            
+                            # Gửi ngay xuống Client
+                            yield f"<script>addRow(`{row_str}`);</script>"
+                            matched_count += 1
+                            total_rows_day += 1
 
-            # --- PHẦN QUAN TRỌNG: KÍCH HOẠT TẢI FILE BẰNG JS ---
-            # Chuyển CSV thành Base64 để gửi qua HTML
-            csv_str = csv_output.getvalue()
-            b64_csv = base64.b64encode(csv_str.encode('utf-8-sig')).decode()
-            filename = f"Baocao_{start_date_str}.csv"
+                yield f"<div class='log-line info'> &nbsp;&nbsp; ➡️ Lọc xong trang {page_num}: Lấy được {matched_count} dòng.</div>"
+
+                # Check Next Page
+                if 'paging' in data and 'next' in data['paging']:
+                    next_url = data['paging']['next']
+                    yield f"<div class='log-line'> &nbsp;&nbsp; ⏳ Đang chuyển sang trang {page_num + 1}...</div>"
+                    time.sleep(0.5)
+                else:
+                    break # Hết trang
             
-            yield f"""
-            <div id='doneMsg' class='download-msg'>
-                ✅ Đã xong {total_rows} dòng. Đang tải file...
-            </div>
-            <script>
-                document.getElementById('doneMsg').style.display = 'block';
-                
-                // Hàm tải file từ Base64
-                function downloadFile(filename, b64) {{
-                    var element = document.createElement('a');
-                    element.setAttribute('href', 'data:text/csv;charset=utf-8;base64,' + b64);
-                    element.setAttribute('download', filename);
-                    element.style.display = 'none';
-                    document.body.appendChild(element);
-                    element.click();
-                    document.body.removeChild(element);
-                }}
-                
-                // Kích hoạt tải ngay
-                downloadFile("{filename}", "{b64_csv}");
-            </script>
-            """
+            yield "<div class='log-line success'>---------------------------------------------------</div>"
 
-            # --- TỰ ĐỘNG CHUYỂN NGÀY ---
-            end_date_str = args.get('end', start_date_str)
-            current_date_obj = datetime.strptime(start_date_str, "%Y-%m-%d")
-            end_date_obj = datetime.strptime(end_date_str, "%Y-%m-%d")
-            next_date_obj = current_date_obj + timedelta(days=1)
-            
-            if next_date_obj <= end_date_obj:
-                next_date_str = next_date_obj.strftime("%Y-%m-%d")
-                args['start'] = next_date_str
-                next_link = request.path + '?' + urlencode(args)
-                
-                # Random sleep trước khi chuyển trang
-                delay = random.randint(3000, 5000)
-                yield f"<div class='info' style='text-align:center; margin-top:10px;'>⏳ Chuyển sang ngày {next_date_str} sau {delay/1000}s...</div>"
-                yield f"""
-                <script>
-                    setTimeout(function() {{
-                        window.location.href = "{next_link}";
-                    }}, {delay});
-                </script>
-                """
-            else:
-                yield "<div class='success' style='text-align:center; margin-top:20px; font-size:20px;'>🎉 HOÀN TẤT TOÀN BỘ!</div>"
+        # --- HOÀN TẤT & CHUYỂN TRANG ---
+        filename = f"Baocao_{start_date_str}.csv"
+        
+        # Nút tải file & Chuyển trang
+        end_date_str = args.get('end', start_date_str)
+        current_date_obj = datetime.strptime(start_date_str, "%Y-%m-%d")
+        end_date_obj = datetime.strptime(end_date_str, "%Y-%m-%d")
+        next_date_obj = current_date_obj + timedelta(days=1)
+        
+        next_js = ""
+        btn_text = "Đã xong ngày này!"
+        if next_date_obj <= end_date_obj:
+            next_date_str = next_date_obj.strftime("%Y-%m-%d")
+            args['start'] = next_date_str
+            next_link = request.path + '?' + urlencode(args)
+            btn_text = f"Đã xong. Tự chuyển sang {next_date_str}..."
+            next_js = f"setTimeout(function() {{ window.location.href = '{next_link}'; }}, 3000);"
 
-            yield "</div></body></html>"
-
-        except Exception as e:
-            yield f"<div class='error'>CRASH: {traceback.format_exc()}</div></body></html>"
+        yield f"""
+        </div> <div class="download-area">
+            <button id="dlBtn" class="btn" onclick="downloadCSV('{filename}')">{btn_text}</button>
+        </div>
+        <script>
+            // Tự động bấm tải
+            document.getElementById('dlBtn').click();
+            // Tự động chuyển trang
+            {next_js}
+        </script>
+        </body></html>
+        """
 
     return Response(stream_with_context(generate()))
 
