@@ -12,7 +12,6 @@ app = Flask(__name__)
 
 FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
 
-# Danh sách ID Tài khoản
 DANH_SACH_TKQC = [
     "581662847745376",
     "1934563933738877",
@@ -37,14 +36,14 @@ def ket_noi_sheet_tab(ten_tab_moi):
 
 @app.route('/')
 def home():
-    return "<h1>Bot V5: Đã kích hoạt chế độ 'Lật trang' (Quét không sót 1 xu)!</h1>"
+    return "<h1>Bot V6: Đã sửa lỗi Invalid Parameter!</h1>"
 
 @app.route('/fb-ads')
 def lay_data_fb():
     try:
         # --- THAM SỐ TỪ LINK ---
         keyword = request.args.get('keyword', '')
-        ten_tab = request.args.get('sheet', 'BaoCaoV5_Full')
+        ten_tab = request.args.get('sheet', 'BaoCaoV6_Fix')
         start_date = request.args.get('start')
         end_date = request.args.get('end')
         date_preset = request.args.get('date', 'today')
@@ -70,17 +69,15 @@ def lay_data_fb():
             # Cấu hình lấy dữ liệu
             fields = f'name,status,{time_param}{{spend,impressions,clicks,cpc,ctr}}'
             
-            # Cấu hình bộ lọc (Filtering) trực tiếp trên API để chính xác hơn
-            # Chúng ta lấy cả camp ĐÃ XÓA (ARCHIVED) và camp TẮT (PAUSED)
+            # ĐÃ SỬA: Xóa 'level' và chuẩn hóa effective_status
             params = {
                 'fields': fields,
                 'access_token': FB_ACCESS_TOKEN,
-                'limit': 500, # Lấy 500 cái mỗi trang
-                'effective_status': '["ACTIVE","PAUSED","DELETED","ARCHIVED","IN_PROCESS","WITH_ISSUES"]',
-                'level': 'campaign'
+                'limit': 500,
+                'effective_status': '["ACTIVE","PAUSED","DELETED","ARCHIVED"]',
             }
             
-            # --- THUẬT TOÁN LẬT TRANG (PAGINATION) ---
+            # --- THUẬT TOÁN LẬT TRANG (GIỮ NGUYÊN) ---
             all_campaigns = []
             next_url = base_url
             trang_thu = 1
@@ -89,8 +86,7 @@ def lay_data_fb():
                 if trang_thu == 1:
                     response = requests.get(next_url, params=params)
                 else:
-                    # Từ trang 2 trở đi, dùng link 'next' Facebook cấp (đã có sẵn params)
-                    response = requests.get(next_url)
+                    response = requests.get(next_url) # Trang sau dùng link có sẵn
                 
                 data = response.json()
                 
@@ -101,21 +97,19 @@ def lay_data_fb():
                 batch_data = data.get('data', [])
                 all_campaigns.extend(batch_data)
                 
-                # Kiểm tra xem còn trang sau không
                 if 'paging' in data and 'next' in data['paging']:
                     next_url = data['paging']['next']
                     trang_thu += 1
                 else:
-                    break # Hết trang rồi, thoát vòng lặp
+                    break 
             
-            # --- XỬ LÝ DỮ LIỆU SAU KHI GOM ĐỦ ---
+            # --- TÍNH TOÁN ---
             dem_camp_co_tien = 0
             
             for camp in all_campaigns:
                 ten_camp = camp.get('name', 'Không tên')
                 trang_thai = camp.get('status', 'UNKNOWN')
                 
-                # Lọc từ khóa (Python Filter)
                 if keyword.lower() in ten_camp.lower():
                     insights_data = camp.get('insights', {}).get('data', [])
                     
@@ -132,10 +126,10 @@ def lay_data_fb():
                             dem_camp_co_tien += 1
                             ket_qua_hien_thi.append(f"<li>[{id_tk}] {ten_camp}: {spend:,.0f}đ</li>")
             
-            nhat_ky_quet.append(f"<li style='color:blue'>TK {id_tk}: Đã lật {trang_thu} trang. Tổng quét {len(all_campaigns)} camp. Lấy được {dem_camp_co_tien} camp có tiêu tiền.</li>")
+            nhat_ky_quet.append(f"<li style='color:blue'>TK {id_tk}: Quét xong {len(all_campaigns)} camp (qua {trang_thu} trang). Lấy được {dem_camp_co_tien} camp có tiền.</li>")
 
         html = f"""
-        <h3>Báo cáo V5 (Full Pagination) hoàn tất!</h3>
+        <h3>Báo cáo V6 (Đã Fix Lỗi)</h3>
         <ul>
             <li><b>Tổng tiền chuẩn:</b> <span style="color:red; font-size:24px; font-weight:bold">{tong_tien_all:,.0f} VNĐ</span></li>
             <li><b>Thời gian:</b> {thoi_gian_bao_cao}</li>
