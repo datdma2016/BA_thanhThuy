@@ -7,12 +7,12 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 
 # ======================================================
-# KHU VỰC CẤU HÌNH (SẾP KIỂM TRA LẠI ID Ở ĐÂY NHÉ)
+# KHU VỰC CẤU HÌNH
 # ======================================================
 
 FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
 
-# Danh sách ID Tài khoản (Nhập ID số, để trong ngoặc kép)
+# Danh sách ID Tài khoản
 DANH_SACH_TKQC = [
     "581662847745376",
     "1934563933738877",
@@ -37,14 +37,14 @@ def ket_noi_sheet_tab(ten_tab_moi):
 
 @app.route('/')
 def home():
-    return "<h1>Bot V4: Đã mở full camp (kể cả camp tắt)!</h1>"
+    return "<h1>Bot V5: Đã kích hoạt chế độ 'Lật trang' (Quét không sót 1 xu)!</h1>"
 
 @app.route('/fb-ads')
 def lay_data_fb():
     try:
-        # --- LẤY THAM SỐ TỪ LINK ---
+        # --- THAM SỐ TỪ LINK ---
         keyword = request.args.get('keyword', '')
-        ten_tab = request.args.get('sheet', 'BaoCaoV4')
+        ten_tab = request.args.get('sheet', 'BaoCaoV5_Full')
         start_date = request.args.get('start')
         end_date = request.args.get('end')
         date_preset = request.args.get('date', 'today')
@@ -59,41 +59,63 @@ def lay_data_fb():
 
         # --- BẮT ĐẦU QUÉT ---
         ket_qua_hien_thi = []
-        nhat_ky_quet = [] # Để debug xem TK nào bị lỗi
+        nhat_ky_quet = [] 
         tong_tien_all = 0
         
         sheet = ket_noi_sheet_tab(ten_tab)
         
         for id_tk in DANH_SACH_TKQC:
-            url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
+            base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
             
-            # Lấy thêm trường 'status' để biết camp đang bật hay tắt
-            fields_string = f'name,status,{time_param}{{spend,impressions,clicks,cpc,ctr}}'
+            # Cấu hình lấy dữ liệu
+            fields = f'name,status,{time_param}{{spend,impressions,clicks,cpc,ctr}}'
             
+            # Cấu hình bộ lọc (Filtering) trực tiếp trên API để chính xác hơn
+            # Chúng ta lấy cả camp ĐÃ XÓA (ARCHIVED) và camp TẮT (PAUSED)
             params = {
-                'fields': fields_string,
+                'fields': fields,
                 'access_token': FB_ACCESS_TOKEN,
-                'limit': 500, # Tăng lên 500 để không bị sót
-                # ĐÃ XÓA DÒNG effective_status ĐỂ LẤY HẾT
+                'limit': 500, # Lấy 500 cái mỗi trang
+                'effective_status': '["ACTIVE","PAUSED","DELETED","ARCHIVED","IN_PROCESS","WITH_ISSUES"]',
+                'level': 'campaign'
             }
             
-            response = requests.get(url, params=params)
-            data = response.json()
+            # --- THUẬT TOÁN LẬT TRANG (PAGINATION) ---
+            all_campaigns = []
+            next_url = base_url
+            trang_thu = 1
             
-            # --- KIỂM TRA LỖI TỪNG TÀI KHOẢN ---
-            if 'error' in data:
-                loi = data['error']['message']
-                nhat_ky_quet.append(f"<li style='color:red'>TK {id_tk}: LỖI - {loi}</li>")
-                continue
-
-            campaigns = data.get('data', [])
-            dem_camp_tk = 0
-
-            for camp in campaigns:
-                ten_camp = camp.get('name', 'Không tên')
-                trang_thai = camp.get('status', 'UNKNOWN') # ACTIVE hoặc PAUSED
+            while True:
+                if trang_thu == 1:
+                    response = requests.get(next_url, params=params)
+                else:
+                    # Từ trang 2 trở đi, dùng link 'next' Facebook cấp (đã có sẵn params)
+                    response = requests.get(next_url)
                 
-                # Logic lọc từ khóa (Nếu không nhập keyword thì luôn đúng)
+                data = response.json()
+                
+                if 'error' in data:
+                    nhat_ky_quet.append(f"<li style='color:red'>TK {id_tk} lỗi: {data['error']['message']}</li>")
+                    break
+                
+                batch_data = data.get('data', [])
+                all_campaigns.extend(batch_data)
+                
+                # Kiểm tra xem còn trang sau không
+                if 'paging' in data and 'next' in data['paging']:
+                    next_url = data['paging']['next']
+                    trang_thu += 1
+                else:
+                    break # Hết trang rồi, thoát vòng lặp
+            
+            # --- XỬ LÝ DỮ LIỆU SAU KHI GOM ĐỦ ---
+            dem_camp_co_tien = 0
+            
+            for camp in all_campaigns:
+                ten_camp = camp.get('name', 'Không tên')
+                trang_thai = camp.get('status', 'UNKNOWN')
+                
+                # Lọc từ khóa (Python Filter)
                 if keyword.lower() in ten_camp.lower():
                     insights_data = camp.get('insights', {}).get('data', [])
                     
@@ -103,35 +125,32 @@ def lay_data_fb():
                         clicks = stat.get('clicks', 0)
                         ctr = float(stat.get('ctr', 0))
                         
-                        # CHỈ LẤY NẾU CÓ TIÊU TIỀN (Dù tắt hay bật)
                         if spend > 0:
                             row = [id_tk, ten_camp, trang_thai, thoi_gian_bao_cao, spend, clicks, ctr]
                             sheet.append_row(row)
                             tong_tien_all += spend
-                            dem_camp_tk += 1
-                            ket_qua_hien_thi.append(f"<li>[{id_tk}] {ten_camp} ({trang_thai}): {spend:,.0f}đ</li>")
+                            dem_camp_co_tien += 1
+                            ket_qua_hien_thi.append(f"<li>[{id_tk}] {ten_camp}: {spend:,.0f}đ</li>")
             
-            nhat_ky_quet.append(f"<li style='color:green'>TK {id_tk}: Quét xong. Lấy được {dem_camp_tk} camp có tiêu tiền.</li>")
+            nhat_ky_quet.append(f"<li style='color:blue'>TK {id_tk}: Đã lật {trang_thu} trang. Tổng quét {len(all_campaigns)} camp. Lấy được {dem_camp_co_tien} camp có tiêu tiền.</li>")
 
         html = f"""
-        <h3>Báo cáo V4 hoàn tất!</h3>
+        <h3>Báo cáo V5 (Full Pagination) hoàn tất!</h3>
         <ul>
-            <li><b>Tab Sheet:</b> {ten_tab}</li>
+            <li><b>Tổng tiền chuẩn:</b> <span style="color:red; font-size:24px; font-weight:bold">{tong_tien_all:,.0f} VNĐ</span></li>
             <li><b>Thời gian:</b> {thoi_gian_bao_cao}</li>
-            <li><b>Từ khóa:</b> "{keyword}"</li>
-            <li><b>Tổng tiền:</b> <span style="color:red; font-size:20px">{tong_tien_all:,.0f} VNĐ</span></li>
         </ul>
         <hr>
-        <h4>Nhật ký quét (Kiểm tra xem có thiếu TK nào không):</h4>
+        <h4>Nhật ký hệ thống:</h4>
         <ul>{''.join(nhat_ky_quet)}</ul>
         <hr>
-        <h4>Chi tiết chiến dịch:</h4>
+        <h4>Chi tiết:</h4>
         <ul>{''.join(ket_qua_hien_thi)}</ul>
         """
         return html
 
     except Exception as e:
-        return f"Lỗi hệ thống: {str(e)}"
+        return f"Lỗi: {str(e)}"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
