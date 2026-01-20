@@ -17,7 +17,8 @@ app = Flask(__name__)
 
 FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
 FILE_SHEET_GOC = "BA_ads_daily_20260120" 
-BATCH_SIZE = 50 # <--- Tăng lên 50 để giảm số lần gọi Google
+BATCH_SIZE = 50 
+SLEEP_TIME = 10 # <--- NGỦ 10 GIÂY SAU MỖI LẦN GHI (CHÌA KHÓA THÀNH CÔNG)
 
 DANH_SACH_TKQC = [
     {"id": "581662847745376", "name": "tick_xanh_001"}, 
@@ -57,7 +58,6 @@ CSS_STYLE = """
 # ======================================================
 # HÀM BỔ TRỢ
 # ======================================================
-
 def fmt_vn(value):
     if not value: return "0"
     try:
@@ -99,16 +99,15 @@ def check_keyword_v12(ten_camp, keyword_string):
         if match_group: return True 
     return False 
 
-# --- HÀM GHI SHEET AN TOÀN (RETRY LOGIC) ---
+# --- HÀM GHI SHEET "CON RÙA" (SIÊU CHẬM) ---
 def safe_write_sheet(worksheet, rows):
     max_retries = 3
     for attempt in range(max_retries):
         try:
             worksheet.append_rows(rows)
-            time.sleep(1) # Nghỉ 1s sau khi ghi để tránh spam Google
             return True, None
         except Exception as e:
-            time.sleep(5) # Nếu lỗi, nghỉ 5s rồi thử lại
+            time.sleep(10) # Lỗi thì nghỉ 10s rồi thử lại
             if attempt == max_retries - 1:
                 return False, str(e)
     return False, "Unknown Error"
@@ -116,7 +115,7 @@ def safe_write_sheet(worksheet, rows):
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V28: Anti-Quota Google (Fix Row 60 Stop)</h1>
+    <h1>Bot V29: Turtle Mode (Super Stable)</h1>
     <ul>
         <li><a href='/fb-ads'>/fb-ads</a>: Báo cáo Tổng Hợp</li>
         <li><a href='/fb-daily'>/fb-daily</a>: Báo cáo Theo Ngày</li>
@@ -248,7 +247,7 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         
         for camp in all_campaigns:
             processed_count += 1
-            if processed_count % 50 == 0: # Cập nhật log mỗi 50 camp
+            if processed_count % 50 == 0:
                 yield f"<div class='log progress'>[TIẾN ĐỘ] Đã xử lý {processed_count}/{total_camp} chiến dịch...</div>"
                 yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
@@ -261,10 +260,10 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                     for stat in insights_data:
                         spend = float(stat.get('spend', 0))
                         if spend > 0:
-                            # ... (Đoạn lấy data giữ nguyên) ...
                             reach = int(stat.get('reach', 0))
                             actions = stat.get('actions', [])
                             action_values = stat.get('action_values', [])
+                            # ... (Giữ nguyên logic lấy data) ...
                             cmts = get_fb_value(actions, ['comment'])
                             msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
                             total_data = cmts + msgs
@@ -297,13 +296,17 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                             
                             BUFFER_ROWS.append(row)
 
-                            # --- GHI SHEET AN TOÀN ---
+                            # --- GHI SHEET & NGỦ KHÒ ---
                             if len(BUFFER_ROWS) >= BATCH_SIZE:
-                                yield f"<span class='heartbeat'>Writing batch ({len(BUFFER_ROWS)} rows)...</span> "
+                                yield f"<span class='heartbeat'>Writing batch ({len(BUFFER_ROWS)})...</span> "
                                 yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
                                 success, err = safe_write_sheet(worksheet, BUFFER_ROWS)
                                 if success:
                                     BUFFER_ROWS = []
+                                    # CHỖ NÀY QUAN TRỌNG: NGỦ 10 GIÂY
+                                    yield f"<div class='log sleep'>[COOL DOWN] Sleeping {SLEEP_TIME}s to please Google...</div>"
+                                    yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
+                                    time.sleep(SLEEP_TIME) 
                                 else:
                                     yield f"<div class='log error'>[WRITE FAIL] {err}</div>"
 
@@ -312,6 +315,8 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
             success, err = safe_write_sheet(worksheet, BUFFER_ROWS)
             if success:
                 yield f"<div class='log success'>[SAVED] Saved final batch.</div>"
+                yield f"<div class='log sleep'>[COOL DOWN] Sleeping {SLEEP_TIME}s...</div>"
+                time.sleep(SLEEP_TIME)
             else:
                 yield f"<div class='log error'>[WRITE FAIL] {err}</div>"
         
