@@ -44,7 +44,7 @@ CSS_STYLE = """
     .date-header { color: #e3b341; font-weight: bold; font-size: 14px; border-top: 1px solid #30363d; margin-top: 10px; padding-top:5px;}
     .sleep { color: #d2a8ff; font-style: italic; }
     .highlight { color: #58a6ff; font-weight: bold; }
-    .countdown { color: #ff7b72; font-weight: bold; } /* Màu đỏ cam cho đếm ngược */
+    .countdown { color: #ff7b72; font-weight: bold; } 
     table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #161b22; font-size: 12px; }
     th, td { border: 1px solid #30363d; padding: 8px; text-align: right; }
     th { background-color: #21262d; text-align: center; color: #f0f6fc; }
@@ -109,7 +109,7 @@ def safe_write_sheet(worksheet, rows):
             worksheet.append_rows(rows)
             return True, None
         except Exception as e:
-            time.sleep(10) 
+            time.sleep(5) 
             if attempt == max_retries - 1:
                 return False, str(e)
     return False, "Unknown Error"
@@ -117,7 +117,7 @@ def safe_write_sheet(worksheet, rows):
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V31: Final Day-by-Day (Countdown Timer)</h1>
+    <h1>Bot V32: Anti-Hang (Timeout Enforced)</h1>
     <ul>
         <li><a href='/fb-ads'>/fb-ads</a>: Báo cáo Tổng Hợp</li>
         <li><a href='/fb-daily'>/fb-daily</a>: Báo cáo Theo Ngày</li>
@@ -126,18 +126,10 @@ def home():
 
 @app.route('/fb-ads')
 def lay_data_tong_hop():
-    # Phần tổng hợp giữ nguyên logic cũ nếu cần
     def generate():
         yield CSS_STYLE
         yield "<h3>> KHỞI ĐỘNG BÁO CÁO TỔNG HỢP...</h3>"
         try:
-            keyword = request.args.get('keyword', '')
-            ten_tab = request.args.get('sheet', 'BaoCaoTongHop')
-            start_date = request.args.get('start')
-            end_date = request.args.get('end')
-            date_preset = request.args.get('date', 'today')
-            yield f"<div class='log info'>[INIT] File='{FILE_SHEET_GOC}' | Tab='{ten_tab}' | Mode=Total</div>"
-            # Logic cũ cho tổng hợp (nếu cần thì paste lại core_process cũ vào đây)
             yield "<div class='log warning'>Chế độ này đang bảo trì để tập trung cho Daily. Vui lòng dùng /fb-daily.</div>"
         except Exception as e:
              yield f"<div class='log error'>[CRASH] {traceback.format_exc()}</div>"
@@ -147,7 +139,7 @@ def lay_data_tong_hop():
 def lay_data_hang_ngay():
     def generate():
         yield CSS_STYLE
-        yield "<h3>> KHỞI ĐỘNG BÁO CÁO CHI TIẾT THEO NGÀY (V31)...</h3>"
+        yield "<h3>> KHỞI ĐỘNG BÁO CÁO CHI TIẾT THEO NGÀY (V32)...</h3>"
         try:
             keyword = request.args.get('keyword', '')
             ten_tab = request.args.get('sheet', 'BaoCaoTungNgay')
@@ -158,7 +150,7 @@ def lay_data_hang_ngay():
                 yield "<div class='log error'>[LỖI] Phải nhập start và end (YYYY-MM-DD) cho chế độ này!</div>"
                 return
 
-            yield f"<div class='log info'>[INIT] File='{FILE_SHEET_GOC}' | Tab='{ten_tab}' | Mode=Day-by-Day</div>"
+            yield f"<div class='log info'>[INIT] File='{FILE_SHEET_GOC}' | Tab='{ten_tab}' | Mode=Day-by-Day (Anti-Hang)</div>"
             yield from process_day_by_day(keyword, ten_tab, start_date_str, end_date_str)
             
         except Exception as e:
@@ -166,7 +158,7 @@ def lay_data_hang_ngay():
     return Response(stream_with_context(generate()))
 
 # ======================================================
-# PROCESS DAY-BY-DAY (V31 - CÓ ĐẾM NGƯỢC)
+# PROCESS DAY-BY-DAY (V32 - TIMEOUT FIX)
 # ======================================================
 def process_day_by_day(keyword, ten_tab, start_date_str, end_date_str):
     yield f"<div class='log info'>[SHEET] Connecting to '{FILE_SHEET_GOC}'...</div>"
@@ -218,14 +210,17 @@ def process_day_by_day(keyword, ten_tab, start_date_str, end_date_str):
             ten_tk = tk_obj['name']
             
             base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
+            # THÊM TIMEOUT=15 ĐỂ CHỐNG TREO
             params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500}
             
             all_campaigns = []
             next_url = base_url
             while True:
                 try:
-                    res = requests.get(next_url, params=params if next_url == base_url else None)
+                    # REQUESTS VỚI TIMEOUT
+                    res = requests.get(next_url, params=params if next_url == base_url else None, timeout=15)
                     data = res.json()
+                    
                     if 'error' in data:
                         yield f"<div class='log error'>[ERROR] {ten_tk}: {data['error']['message']}</div>"
                         break
@@ -233,7 +228,12 @@ def process_day_by_day(keyword, ten_tab, start_date_str, end_date_str):
                     if 'paging' in data and 'next' in data['paging']:
                         next_url = data['paging']['next']
                     else: break
-                except: break
+                except requests.exceptions.Timeout:
+                    yield f"<div class='log error'>[TIMEOUT] Mạng bị treo khi gọi {ten_tk}. Bỏ qua trang này.</div>"
+                    break
+                except Exception as e:
+                    yield f"<div class='log error'>[API ERROR] {str(e)}</div>"
+                    break
             
             for camp in all_campaigns:
                 ten_camp = camp.get('name', 'Không tên')
@@ -277,12 +277,11 @@ def process_day_by_day(keyword, ten_tab, start_date_str, end_date_str):
                             row = [current_date_str, id_tk, ten_tk, ten_camp, trang_thai, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100, matched_tag]
                             BUFFER_ROWS.append(row)
             
-            # Log nhẹ trạng thái từng TK
             if len(all_campaigns) > 0:
                  yield f"<span class='debug'>[{ten_tk}] </span>"
                  yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
-        # --- GHI SHEET & ĐẾM NGƯỢC ---
+        # --- GHI SHEET ---
         if BUFFER_ROWS:
             yield f"<br><div class='log warning'>[WRITE] Đang ghi {len(BUFFER_ROWS)} dòng...</div>"
             success, err = safe_write_sheet(worksheet, BUFFER_ROWS)
@@ -293,9 +292,9 @@ def process_day_by_day(keyword, ten_tab, start_date_str, end_date_str):
         else:
             yield f"<br><div class='log info'>Ngày {current_date_str} không có dữ liệu.</div>"
         
-        # --- ĐÂY LÀ ĐOẠN ĐẾM NGƯỢC (ĐỂ KHÔNG BỊ BLOCK & TIMEOUT) ---
+        # --- ĐẾM NGƯỢC ---
         yield f"<div class='log sleep'>⏳ Chờ Google và Facebook nghỉ ngơi: </div>"
-        for i in range(5, 0, -1): # Đếm ngược 5 giây
+        for i in range(5, 0, -1): 
             yield f"<span class='countdown'>{i}... </span>"
             yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
             time.sleep(1)
