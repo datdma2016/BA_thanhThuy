@@ -76,7 +76,7 @@ def check_keyword_v12(ten_camp, keyword_string):
 
 @app.route('/')
 def home():
-    return "<h1>Bot V19: Video + Sales + Keyword Compare Ready!</h1>"
+    return "<h1>Bot V20 (FINAL): Added 'Keyword Tag' Column!</h1>"
 
 @app.route('/fb-ads')
 def lay_data_fb():
@@ -105,13 +105,13 @@ def lay_data_fb():
             .final-section { background: #0d1117; border-top: 2px solid #30363d; margin-top: 30px; padding-top: 20px; }
             h2 { color: #f0f6fc; margin-top: 30px; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
         </style>
-        <h3>> KHỞI ĐỘNG V19 (FULL METRICS + KEYWORD COMPARE)...</h3>
+        <h3>> KHỞI ĐỘNG V20 (TAGGING COLUMN)...</h3>
         """
         
         try:
             # --- 1. LẤY THAM SỐ ---
             keyword = request.args.get('keyword', '')
-            ten_tab = request.args.get('sheet', 'BaoCaoV19_Compare')
+            ten_tab = request.args.get('sheet', 'BaoCaoV20_Tag')
             start_date = request.args.get('start')
             end_date = request.args.get('end')
             date_preset = request.args.get('date', 'today')
@@ -126,8 +126,7 @@ def lay_data_fb():
 
             yield f"<div class='log info'>[INIT] Config: Tab='{ten_tab}' | Key='{keyword}'</div>"
             
-            # --- TÁCH TỪ KHÓA ĐỂ SO SÁNH ---
-            # Nếu sếp nhập "Kem, Sua" -> List là ["Kem", "Sua"]
+            # Tách từ khóa để so sánh và gắn thẻ
             KEYWORD_GROUPS = [k.strip() for k in keyword.split(',') if k.strip()]
             stats_by_keyword = {k: {'spend':0, 'revenue':0, 'data':0, 'orders':0, 'view100':0, 'reach':0} for k in KEYWORD_GROUPS}
 
@@ -138,11 +137,13 @@ def lay_data_fb():
             client = gspread.authorize(creds)
             sh = client.open(FILE_SHEET_GOC)
             
+            # Thêm cột "Từ khóa (Tag)" vào cuối cùng
             HEADERS = [
                 "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Thời gian", 
                 "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS",
                 "Lượt mua", "AOV", "Rev/Data", 
-                "ThruPlay", "View 25% (Số)", "View 100% (Số)"
+                "ThruPlay", "View 25% (Số)", "View 100% (Số)",
+                "Từ khóa (Tag)" # <--- Cột mới ở đây
             ]
             
             try:
@@ -161,7 +162,6 @@ def lay_data_fb():
             tong_hop_tk = {}
             BUFFER_ROWS = [] 
             
-            # Gọi đích danh chỉ số Video
             fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
             fields_list = f'name,status,{time_param}{{spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
@@ -208,7 +208,6 @@ def lay_data_fb():
                     ten_camp = camp.get('name', 'Không tên')
                     trang_thai = camp.get('status', 'UNKNOWN')
                     
-                    # Kiểm tra logic chung (để lọc xem có lấy camp này ko)
                     if check_keyword_v12(ten_camp, keyword):
                         insights = camp.get('insights', {}).get('data', [])
                         if insights:
@@ -220,14 +219,12 @@ def lay_data_fb():
                                 actions = stat.get('actions', [])
                                 action_values = stat.get('action_values', [])
 
-                                # Metrics
                                 cmts = get_fb_value(actions, ['comment'])
                                 msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
                                 total_data = cmts + msgs
                                 revenue = get_fb_value(action_values, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
                                 orders = get_fb_value(actions, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
                                 
-                                # Video
                                 thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
                                 if thruplay == 0: thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
                                 
@@ -237,33 +234,39 @@ def lay_data_fb():
                                 view100 = get_fb_value(actions, ['video_p100_watched_actions'])
                                 if view100 == 0: view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
 
-                                # Calculated
                                 gia_data = round(spend / total_data) if total_data > 0 else 0
                                 roas = (revenue / spend) if spend > 0 else 0
                                 aov = round(revenue / orders) if orders > 0 else 0
                                 rev_per_data = round(revenue / total_data) if total_data > 0 else 0
                                 
-                                # --- PHÂN LOẠI VÀO NHÓM TỪ KHÓA ---
-                                for kw_group in KEYWORD_GROUPS:
-                                    # Dùng check_keyword_v12 để kiểm tra xem camp này có thuộc nhóm từ khóa này không
-                                    if check_keyword_v12(ten_camp, kw_group):
-                                        stats_by_keyword[kw_group]['spend'] += spend
-                                        stats_by_keyword[kw_group]['revenue'] += revenue
-                                        stats_by_keyword[kw_group]['data'] += total_data
-                                        stats_by_keyword[kw_group]['orders'] += orders
-                                        stats_by_keyword[kw_group]['view100'] += view100
-                                        stats_by_keyword[kw_group]['reach'] += reach
+                                # --- XÁC ĐỊNH TAG (TỪ KHÓA) ---
+                                matched_tag = "Other"
+                                if len(KEYWORD_GROUPS) > 0:
+                                    for kw_group in KEYWORD_GROUPS:
+                                        if check_keyword_v12(ten_camp, kw_group):
+                                            # Gắn thẻ tag là từ khóa đầu tiên khớp
+                                            matched_tag = kw_group
+                                            # Cộng dồn thống kê
+                                            stats_by_keyword[kw_group]['spend'] += spend
+                                            stats_by_keyword[kw_group]['revenue'] += revenue
+                                            stats_by_keyword[kw_group]['data'] += total_data
+                                            stats_by_keyword[kw_group]['orders'] += orders
+                                            stats_by_keyword[kw_group]['view100'] += view100
+                                            stats_by_keyword[kw_group]['reach'] += reach
+                                            break # Đã tìm thấy tag thì dừng (để tránh double count nếu camp khớp nhiều tag)
+                                else:
+                                    matched_tag = "All"
 
-                                # Buffer Sheet
+                                # Buffer Sheet - Thêm matched_tag vào cuối
                                 row = [
                                     id_tk, ten_tk, ten_camp, trang_thai, thoi_gian_bao_cao, 
                                     spend, reach, total_data, gia_data, revenue, roas,
                                     orders, aov, rev_per_data,
-                                    thruplay, view25, view100
+                                    thruplay, view25, view100,
+                                    matched_tag # <--- Dữ liệu cột cuối
                                 ]
                                 BUFFER_ROWS.append(row)
                                 
-                                # Sum TK
                                 tong_hop_tk[ten_tk]['spend'] += spend
                                 tong_hop_tk[ten_tk]['revenue'] += revenue
                                 tong_hop_tk[ten_tk]['data'] += total_data
@@ -274,7 +277,6 @@ def lay_data_fb():
                                 tong_hop_tk[ten_tk]['view100'] += view100
                                 tong_hop_tk[ten_tk]['camp_count'] += 1
                                 
-                                # Grand Total
                                 grand_total['spend'] += spend
                                 grand_total['revenue'] += revenue
                                 grand_total['data'] += total_data
@@ -297,38 +299,19 @@ def lay_data_fb():
                 except Exception as e:
                     yield f"<div class='log error'>[FATAL] Sheet Error: {str(e)}</div>"
 
-            # --- RENDER BÁO CÁO ---
             yield "<div class='final-section'>"
             
-            # 1. BẢNG SO SÁNH TỪ KHÓA (NẾU CÓ NHIỀU TỪ KHÓA)
             if len(KEYWORD_GROUPS) > 0:
                 yield "<h2>🔍 SO SÁNH HIỆU QUẢ TỪ KHÓA</h2>"
                 yield "<table><thead><tr><th>Từ Khóa</th><th>Tiêu</th><th>Data</th><th>Giá Data</th><th>Đơn</th><th>Doanh Thu</th><th>ROAS</th><th>View 100%</th></tr></thead><tbody>"
                 for kw, val in stats_by_keyword.items():
                     cpa_kw = round(val['spend'] / val['data']) if val['data'] > 0 else 0
                     roas_kw = (val['revenue'] / val['spend']) if val['spend'] > 0 else 0
-                    
-                    # Highlight dòng nào hiệu quả (ROAS > 1.5)
                     style_row = "background:#1f2937" if roas_kw > 1.5 else ""
-                    
-                    yield f"""
-                    <tr style='{style_row}'>
-                        <td><span class='highlight'>{kw}</span></td>
-                        <td align='right'>{fmt_vn(val['spend'])}</td>
-                        <td align='center'>{fmt_vn(val['data'])}</td>
-                        <td align='right'>{fmt_vn(cpa_kw)}</td>
-                        <td align='center'>{fmt_vn(val['orders'])}</td>
-                        <td align='right'>{fmt_vn(val['revenue'])}</td>
-                        <td align='center' style='color:{'#3fb950' if roas_kw > 1 else '#ff7b72'}'><b>{roas_kw:.2f}</b></td>
-                        <td align='right'>{fmt_vn(val['view100'])}</td>
-                    </tr>
-                    """
+                    yield f"""<tr style='{style_row}'><td><span class='highlight'>{kw}</span></td><td align='right'>{fmt_vn(val['spend'])}</td><td align='center'>{fmt_vn(val['data'])}</td><td align='right'>{fmt_vn(cpa_kw)}</td><td align='center'>{fmt_vn(val['orders'])}</td><td align='right'>{fmt_vn(val['revenue'])}</td><td align='center' style='color:{'#3fb950' if roas_kw > 1 else '#ff7b72'}'><b>{roas_kw:.2f}</b></td><td align='right'>{fmt_vn(val['view100'])}</td></tr>"""
                 yield "</tbody></table>"
 
-            # 2. BÁO CÁO TỔNG QUAN TÀI KHOẢN (FULL COLUMNS)
             g_reach = grand_total['reach']
-            g_view100 = grand_total['view100']
-            g_rate100 = (g_view100 / g_reach * 100) if g_reach > 0 else 0
             
             yield f"""
             <h2>📊 TỔNG QUAN TÀI KHOẢN</h2>
@@ -338,37 +321,14 @@ def lay_data_fb():
                 <div class='kpi-card'><div class='kpi-title'>📩 Tổng Data</div><div class='kpi-value'>{fmt_vn(grand_total['data'])}</div></div>
                 <div class='kpi-card'><div class='kpi-title'>🛒 Tổng Đơn</div><div class='kpi-value'>{fmt_vn(grand_total['orders'])}</div></div>
             </div>
-            
-            <table>
-                <thead>
-                    <tr>
-                        <th>Tên TK</th><th>Tiêu</th><th>Data</th><th>Giá Data</th>
-                        <th>Đơn</th><th>AOV</th><th>Rev/Data</th>
-                        <th>Doanh Thu</th><th>ROAS</th><th>ThruPlay</th>
-                    </tr>
-                </thead>
-                <tbody>
+            <table><thead><tr><th>Tên TK</th><th>Tiêu</th><th>Data</th><th>Giá Data</th><th>Đơn</th><th>AOV</th><th>Rev/Data</th><th>Doanh Thu</th><th>ROAS</th><th>ThruPlay</th></tr></thead><tbody>
             """
             for ten, val in tong_hop_tk.items():
                 cpa = round(val['spend'] / val['data']) if val['data'] > 0 else 0
                 roas = (val['revenue'] / val['spend']) if val['spend'] > 0 else 0
                 aov = round(val['revenue'] / val['orders']) if val['orders'] > 0 else 0
                 rev_per_data = round(val['revenue'] / val['data']) if val['data'] > 0 else 0
-                
-                yield f"""
-                    <tr>
-                        <td><span class='highlight'>{ten}</span></td>
-                        <td align='right'>{fmt_vn(val['spend'])}</td>
-                        <td align='center'>{fmt_vn(val['data'])}</td>
-                        <td align='right'>{fmt_vn(cpa)}</td>
-                        <td align='center'>{fmt_vn(val['orders'])}</td>
-                        <td align='right'>{fmt_vn(aov)}</td>
-                        <td align='right'>{fmt_vn(rev_per_data)}</td>
-                        <td align='right'>{fmt_vn(val['revenue'])}</td>
-                        <td align='center' style='color:{'#3fb950' if roas > 1 else '#ff7b72'}'><b>{roas:.2f}</b></td>
-                        <td align='right'>{fmt_vn(val['thruplay'])}</td>
-                    </tr>
-                """
+                yield f"""<tr><td><span class='highlight'>{ten}</span></td><td align='right'>{fmt_vn(val['spend'])}</td><td align='center'>{fmt_vn(val['data'])}</td><td align='right'>{fmt_vn(cpa)}</td><td align='center'>{fmt_vn(val['orders'])}</td><td align='right'>{fmt_vn(aov)}</td><td align='right'>{fmt_vn(rev_per_data)}</td><td align='right'>{fmt_vn(val['revenue'])}</td><td align='center' style='color:{'#3fb950' if roas > 1 else '#ff7b72'}'><b>{roas:.2f}</b></td><td align='right'>{fmt_vn(val['thruplay'])}</td></tr>"""
             yield """</tbody></table></div><script>window.scrollTo(0, document.body.scrollHeight);</script>"""
 
         except Exception as e:
