@@ -40,6 +40,7 @@ def fmt_vn(value):
         return str(value)
 
 def get_fb_value(data_list, keys_target, value_key='value'):
+    """Hàm đào dữ liệu đa năng"""
     if not data_list: return 0
     for k in keys_target:
         for item in data_list:
@@ -75,7 +76,7 @@ def check_keyword_v12(ten_camp, keyword_string):
 
 @app.route('/')
 def home():
-    return "<h1>Bot V17: Video Metrics Pro - Rate % Calculated!</h1>"
+    return "<h1>Bot V18: Video Deep Scan - Fix Metrics 0</h1>"
 
 @app.route('/fb-ads')
 def lay_data_fb():
@@ -88,6 +89,7 @@ def lay_data_fb():
             .error { color: #f85149; }
             .warning { color: #d29922; }
             .info { color: #8b949e; }
+            .debug { color: #e3b341; font-weight:bold; } /* Màu vàng cho Debug */
             .sleep { color: #d2a8ff; font-style: italic; }
             .highlight { color: #58a6ff; font-weight: bold; }
             
@@ -103,13 +105,13 @@ def lay_data_fb():
             
             .final-section { background: #0d1117; border-top: 2px solid #30363d; margin-top: 30px; padding-top: 20px; }
         </style>
-        <h3>> KHỞI ĐỘNG V17 (VIDEO METRICS PRO)...</h3>
+        <h3>> KHỞI ĐỘNG V18 (VIDEO DEEP SCAN)...</h3>
         """
         
         try:
             # --- 1. LẤY THAM SỐ ---
             keyword = request.args.get('keyword', '')
-            ten_tab = request.args.get('sheet', 'BaoCaoV17_Video')
+            ten_tab = request.args.get('sheet', 'BaoCaoV18_VideoFix')
             start_date = request.args.get('start')
             end_date = request.args.get('end')
             date_preset = request.args.get('date', 'today')
@@ -131,7 +133,6 @@ def lay_data_fb():
             client = gspread.authorize(creds)
             sh = client.open(FILE_SHEET_GOC)
             
-            # HEADER MỚI: Thêm cột Tỉ lệ %
             HEADERS = [
                 "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Thời gian", 
                 "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS",
@@ -154,7 +155,9 @@ def lay_data_fb():
             tong_hop_tk = {}
             BUFFER_ROWS = [] 
             
-            fields_list = f'name,status,{time_param}{{spend,reach,actions,action_values,purchase_roas}}'
+            # --- CẤU HÌNH QUAN TRỌNG: GỌI ĐÍCH DANH CHỈ SỐ VIDEO ---
+            fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
+            fields_list = f'name,status,{time_param}{{spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
             for i, tk_obj in enumerate(DANH_SACH_TKQC):
                 if i > 0: 
@@ -194,6 +197,7 @@ def lay_data_fb():
                     except: break
 
                 count_camp = 0
+                debug_shown = False # Chỉ hiện debug cho camp đầu tiên để đỡ rối
                 
                 for camp in all_campaigns:
                     ten_camp = camp.get('name', 'Không tên')
@@ -210,25 +214,39 @@ def lay_data_fb():
                                 actions = stat.get('actions', [])
                                 action_values = stat.get('action_values', [])
 
+                                # --- DEBUG ACTION KEYS (Để bắt bệnh nếu = 0) ---
+                                if not debug_shown and actions:
+                                    keys_found = [x.get('action_type') for x in actions]
+                                    yield f"<div class='log debug'>[DEBUG] {ten_tk} keys: {str(keys_found)}</div>"
+                                    debug_shown = True
+
                                 # Data & Revenue
                                 cmts = get_fb_value(actions, ['comment'])
                                 msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
                                 total_data = cmts + msgs
                                 revenue = get_fb_value(action_values, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
                                 
-                                # --- VIDEO METRICS (CHUẨN API KEY) ---
+                                # --- LẤY CHỈ SỐ VIDEO (ƯU TIÊN LẤY TỪ ACTIONS CHUNG) ---
                                 thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
-                                view25 = get_fb_value(actions, ['video_p25_watched_actions']) # Đúng key 25%
-                                view100 = get_fb_value(actions, ['video_p100_watched_actions']) # Đúng key 100%
+                                view25 = get_fb_value(actions, ['video_p25_watched_actions'])
+                                view100 = get_fb_value(actions, ['video_p100_watched_actions'])
                                 
-                                # Tính toán Rate (Dựa trên Reach)
+                                # --- NẾU VẪN = 0, THỬ TÌM TRONG TRƯỜNG RIÊNG (CƠ CHẾ VÉT CẠN) ---
+                                if thruplay == 0:
+                                    # Khi gọi riêng, nó trả về list: [{'action_type': 'video_view', 'value': '123'}]
+                                    thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
+                                if view25 == 0:
+                                    view25 = get_fb_value(stat.get('video_p25_watched_actions', []), ['video_view', 'video_play'])
+                                if view100 == 0:
+                                    view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
+
+                                # Tính toán Rate
                                 rate25 = (view25 / reach) if reach > 0 else 0
                                 rate100 = (view100 / reach) if reach > 0 else 0
                                 
                                 gia_data = round(spend / total_data) if total_data > 0 else 0
                                 roas = (revenue / spend) if spend > 0 else 0
                                 
-                                # Lưu vào Sheet (Có thêm cột Rate)
                                 row = [
                                     id_tk, ten_tk, ten_camp, trang_thai, thoi_gian_bao_cao, 
                                     spend, reach, total_data, gia_data, revenue, roas,
@@ -236,7 +254,6 @@ def lay_data_fb():
                                 ]
                                 BUFFER_ROWS.append(row)
                                 
-                                # Cộng dồn tổng
                                 tong_hop_tk[ten_tk]['spend'] += spend
                                 tong_hop_tk[ten_tk]['revenue'] += revenue
                                 tong_hop_tk[ten_tk]['data'] += total_data
@@ -258,7 +275,6 @@ def lay_data_fb():
                 yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp} camps matched.</div>"
                 yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
-            # --- 4. GHI SHEET ---
             if BUFFER_ROWS:
                 yield f"<div class='log warning'>[WRITE] Writing {len(BUFFER_ROWS)} rows...</div>"
                 try:
@@ -269,18 +285,16 @@ def lay_data_fb():
             else:
                 yield f"<div class='log info'>No data found.</div>"
 
-            # --- 5. TÍNH TOÁN KPI TỔNG ---
             g_reach = grand_total['reach']
             g_view25 = grand_total['view25']
             g_view100 = grand_total['view100']
             
-            # Tính Rate Tổng
             g_rate25 = (g_view25 / g_reach * 100) if g_reach > 0 else 0
             g_rate100 = (g_view100 / g_reach * 100) if g_reach > 0 else 0
             
             yield f"""
             <div class='final-section'>
-                <h2 style='color:#f0f6fc; margin-bottom: 20px;'>BÁO CÁO V17 (VIDEO PRO)</h2>
+                <h2 style='color:#f0f6fc; margin-bottom: 20px;'>BÁO CÁO V18 (VIDEO DEEP SCAN)</h2>
                 
                 <div class='kpi-box'>
                     <div class='kpi-card'><div class='kpi-title'>💰 Tổng Tiêu</div><div class='kpi-value' style='color:#ff7b72'>{fmt_vn(grand_total['spend'])}</div></div>
