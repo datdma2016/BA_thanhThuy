@@ -6,13 +6,13 @@ import time
 import io
 import csv
 from urllib.parse import urlencode
-from flask import Flask, request, jsonify, Response, stream_with_context, make_response
+from flask import Flask, request, jsonify, Response, stream_with_context
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
 # ======================================================
-# 1. CẤU HÌNH (KHÔNG CẦN KẾT NỐI GOOGLE NỮA)
+# 1. CẤU HÌNH
 # ======================================================
 
 FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
@@ -89,40 +89,29 @@ def check_keyword_v12(ten_camp, keyword_string):
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V35: Local Download Mode</h1>
+    <h1>Bot V36: Local Download (Robust Mode)</h1>
     <ul>
-        <li><a href='/fb-download'>/fb-download</a>: Tải báo cáo Excel (CSV) về máy</li>
+        <li><a href='/fb-download'>/fb-download</a>: Tải báo cáo CSV (Đã fix lỗi mất data)</li>
     </ul>
     """
 
 @app.route('/fb-download')
 def download_data_ngay():
-    # Bước 1: Lấy tham số
     args = request.args.to_dict()
     keyword = args.get('keyword', '')
     start_date_str = args.get('start')
     
-    # Nếu chưa có ngày start, báo lỗi
     if not start_date_str:
         return "<h3>LỖI: Vui lòng nhập ngày bắt đầu (?start=YYYY-MM-DD)</h3>"
 
-    # Bước 2: Xử lý dữ liệu (Chỉ quét 1 ngày)
-    csv_content, row_count = process_single_day_csv(keyword, start_date_str)
+    # Bước 1: Quét dữ liệu (Code V36 mạnh mẽ hơn)
+    csv_content, row_count, debug_info = process_single_day_csv(keyword, start_date_str)
 
-    # Bước 3: Tạo phản hồi (Response) để tải file
-    # Nếu có tham số 'next' -> Nghĩa là đang trong vòng lặp tự động
-    # Nhưng vì tải file sẽ chiếm quyền điều khiển của trình duyệt, ta cần 1 trang trung gian
-    
-    # Để đơn giản cho Sếp:
-    # Code này sẽ trả về 1 trang HTML.
-    # Trang này sẽ tự động kích hoạt tải file.
-    # Sau đó tự động chuyển sang ngày tiếp theo.
-
-    end_date_str = args.get('end', start_date_str) # Nếu ko có end thì end = start
+    # Bước 2: Chuẩn bị chuyển trang
+    end_date_str = args.get('end', start_date_str)
     current_date_obj = datetime.strptime(start_date_str, "%Y-%m-%d")
     end_date_obj = datetime.strptime(end_date_str, "%Y-%m-%d")
     
-    # Tính ngày tiếp theo
     next_date_obj = current_date_obj + timedelta(days=1)
     next_link = ""
     status_msg = "Đã hoàn tất toàn bộ!"
@@ -133,9 +122,6 @@ def download_data_ngay():
         next_link = request.path + '?' + urlencode(args)
         status_msg = f"Đang chuyển sang ngày {next_date_str}..."
 
-    # Encode CSV sang base64 hoặc để trong biến JS để tải
-    # Cách tốt nhất: Dùng Blob trong JS để tạo file tải xuống mà không cần server lưu file
-    
     import base64
     b64_csv = base64.b64encode(csv_content.encode('utf-8-sig')).decode()
     filename = f"Baocao_{start_date_str}.csv"
@@ -145,7 +131,8 @@ def download_data_ngay():
     <head>{CSS_STYLE}</head>
     <body>
         <h2>📊 Đã quét xong ngày: <span class="highlight">{start_date_str}</span></h2>
-        <div class="info">Tìm thấy: {row_count} dòng dữ liệu.</div>
+        <div class="info">Tìm thấy: {row_count} dòng khớp từ khóa.</div>
+        <div class="log" style="font-size:11px; color:#888; max-height:100px; overflow:auto;">{debug_info}</div>
         
         <a id="downloadLink" class="download-btn" download="{filename}" href="data:text/csv;charset=utf-8;base64,{b64_csv}">
             📥 Tải File {filename}
@@ -154,32 +141,25 @@ def download_data_ngay():
         <div class="auto-msg" id="statusMsg">{status_msg}</div>
 
         <script>
-            // 1. Tự động bấm nút tải
             document.getElementById('downloadLink').click();
-
-            // 2. Tự động chuyển trang sau 3 giây (nếu còn ngày tiếp theo)
             var nextLink = "{next_link}";
             if (nextLink) {{
                 setTimeout(function() {{
                     window.location.href = nextLink;
-                }}, 3000); // Đợi 3s để file kịp tải
+                }}, 3000); 
             }}
         </script>
     </body>
     </html>
     """
-    
     return html_response
 
 # ======================================================
-# LOGIC XỬ LÝ CSV (KHÔNG DÙNG GSPREAD)
+# LOGIC XỬ LÝ CSV (FIXED RETRY)
 # ======================================================
 def process_single_day_csv(keyword, current_date_str):
-    # Tạo bộ nhớ đệm cho CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    # Ghi Header
     HEADERS = ["Ngày", "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS", "Lượt mua", "AOV", "Rev/Data", "ThruPlay", "View 25%", "View 100%", "Từ khóa (Tag)"]
     writer.writerow(HEADERS)
 
@@ -190,28 +170,55 @@ def process_single_day_csv(keyword, current_date_str):
     fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
     total_rows = 0
+    debug_log = ""
 
     for tk_obj in DANH_SACH_TKQC:
         id_tk = tk_obj['id']
         ten_tk = tk_obj['name']
         
         base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
-        params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500}
+        params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500} # Lấy 500 thằng 1 lần
         
         all_campaigns = []
         next_url = base_url
+        page_count = 0
         
+        # --- CƠ CHẾ RETRY MẠNH MẼ ---
         while True:
-            try:
-                res = requests.get(next_url, params=params if next_url == base_url else None, timeout=10)
-                data = res.json()
-                if 'error' in data: break
-                all_campaigns.extend(data.get('data', []))
-                if 'paging' in data and 'next' in data['paging']:
-                    next_url = data['paging']['next']
-                else: break
-            except: break
+            retries = 3
+            success = False
+            while retries > 0:
+                try:
+                    res = requests.get(next_url, params=params if next_url == base_url else None, timeout=20)
+                    data = res.json()
+                    
+                    if 'error' in data:
+                        debug_log += f"<br>[ERROR] {ten_tk}: {data['error']['message']}"
+                        retries = 0 # Lỗi Token thì dừng luôn
+                        break
+                    
+                    fetched = data.get('data', [])
+                    all_campaigns.extend(fetched)
+                    page_count += 1
+                    
+                    if 'paging' in data and 'next' in data['paging']:
+                        next_url = data['paging']['next']
+                        success = True # Lấy thành công trang này, chuẩn bị lấy trang sau
+                        break # Thoát vòng lặp retry
+                    else:
+                        next_url = None # Hết trang
+                        success = True
+                        break
+                except Exception as e:
+                    retries -= 1
+                    debug_log += f"<br>[RETRY] {ten_tk} Page {page_count}: {str(e)} (Còn {retries} lần)"
+                    time.sleep(2)
+            
+            if not success or not next_url:
+                break
         
+        debug_log += f"<br>✅ {ten_tk}: Quét được tổng {len(all_campaigns)} campaigns gốc."
+
         for camp in all_campaigns:
             ten_camp = camp.get('name', 'Không tên')
             trang_thai = camp.get('status', 'UNKNOWN')
@@ -222,39 +229,41 @@ def process_single_day_csv(keyword, current_date_str):
                     stat = insights_data[0] 
                     spend = float(stat.get('spend', 0))
                     
-                    if spend > 0: 
-                        reach = int(stat.get('reach', 0))
-                        actions = stat.get('actions', [])
-                        action_values = stat.get('action_values', [])
-                        cmts = get_fb_value(actions, ['comment'])
-                        msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
-                        total_data = cmts + msgs
-                        revenue = get_fb_value(action_values, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
-                        orders = get_fb_value(actions, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
-                        thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
-                        if thruplay == 0: thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
-                        view25 = get_fb_value(actions, ['video_p25_watched_actions'])
-                        if view25 == 0: view25 = get_fb_value(stat.get('video_p25_watched_actions', []), ['video_view', 'video_play'])
-                        view100 = get_fb_value(actions, ['video_p100_watched_actions'])
-                        if view100 == 0: view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
-                        gia_data = round(spend / total_data) if total_data > 0 else 0
-                        roas = (revenue / spend) if spend > 0 else 0
-                        aov = round(revenue / orders) if orders > 0 else 0
-                        rev_per_data = round(revenue / total_data) if total_data > 0 else 0
-                        
-                        matched_tag = "Other"
-                        if len(KEYWORD_GROUPS) > 0:
-                            for kw_group in KEYWORD_GROUPS:
-                                    if check_keyword_v12(ten_camp, kw_group):
-                                        matched_tag = kw_group
-                                        break
-                        else: matched_tag = "All"
+                    # --- ĐIỀU CHỈNH: Bỏ qua check > 0 nếu cần kiểm tra chiến dịch "ẩn" ---
+                    # if spend >= 0: # Lấy hết kể cả 0 đồng để kiểm tra
+                    
+                    reach = int(stat.get('reach', 0))
+                    actions = stat.get('actions', [])
+                    action_values = stat.get('action_values', [])
+                    cmts = get_fb_value(actions, ['comment'])
+                    msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
+                    total_data = cmts + msgs
+                    revenue = get_fb_value(action_values, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
+                    orders = get_fb_value(actions, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
+                    thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
+                    if thruplay == 0: thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
+                    view25 = get_fb_value(actions, ['video_p25_watched_actions'])
+                    if view25 == 0: view25 = get_fb_value(stat.get('video_p25_watched_actions', []), ['video_view', 'video_play'])
+                    view100 = get_fb_value(actions, ['video_p100_watched_actions'])
+                    if view100 == 0: view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
+                    gia_data = round(spend / total_data) if total_data > 0 else 0
+                    roas = (revenue / spend) if spend > 0 else 0
+                    aov = round(revenue / orders) if orders > 0 else 0
+                    rev_per_data = round(revenue / total_data) if total_data > 0 else 0
+                    
+                    matched_tag = "Other"
+                    if len(KEYWORD_GROUPS) > 0:
+                        for kw_group in KEYWORD_GROUPS:
+                                if check_keyword_v12(ten_camp, kw_group):
+                                    matched_tag = kw_group
+                                    break
+                    else: matched_tag = "All"
 
-                        row = [current_date_str, id_tk, ten_tk, ten_camp, trang_thai, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100, matched_tag]
-                        writer.writerow(row)
-                        total_rows += 1
+                    row = [current_date_str, id_tk, ten_tk, ten_camp, trang_thai, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100, matched_tag]
+                    writer.writerow(row)
+                    total_rows += 1
 
-    return output.getvalue(), total_rows
+    return output.getvalue(), total_rows, debug_log
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
