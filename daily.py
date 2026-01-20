@@ -1,23 +1,21 @@
-import gspread
 import requests
 import json
 import traceback
 import shlex
 import time
-import random
+import io
+import csv
 from urllib.parse import urlencode
-from oauth2client.service_account import ServiceAccountCredentials
-from flask import Flask, request, jsonify, Response, stream_with_context
+from flask import Flask, request, jsonify, Response, stream_with_context, make_response
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
 # ======================================================
-# 1. CẤU HÌNH
+# 1. CẤU HÌNH (KHÔNG CẦN KẾT NỐI GOOGLE NỮA)
 # ======================================================
 
 FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
-FILE_SHEET_GOC = "BA_ads_daily_20260120" 
 
 DANH_SACH_TKQC = [
     {"id": "581662847745376", "name": "tick_xanh_001"}, 
@@ -41,14 +39,13 @@ CSS_STYLE = """
     .error { color: #f85149; }
     .warning { color: #d29922; }
     .info { color: #8b949e; }
-    .debug { color: #79c0ff; font-weight: bold; }
-    .date-header { color: #e3b341; font-weight: bold; font-size: 16px; border-top: 1px solid #30363d; margin-top: 10px; padding-top:10px;}
-    .next-btn { background: #238636; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px;}
-    .redirect-msg { color: #ff7b72; font-weight: bold; font-size: 14px; margin-top: 10px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #161b22; font-size: 12px; }
-    th, td { border: 1px solid #30363d; padding: 8px; text-align: right; }
-    th { background-color: #21262d; text-align: center; color: #f0f6fc; }
-    td:first-child { text-align: left; }
+    .highlight { color: #58a6ff; font-weight: bold; }
+    .download-btn { 
+        background: #238636; color: white; padding: 12px 24px; 
+        text-decoration: none; border-radius: 6px; display: inline-block; 
+        margin-top: 15px; font-size: 14px; font-weight: bold;
+    }
+    .auto-msg { color: #e3b341; margin-top: 10px; font-style: italic; }
 </style>
 """
 
@@ -89,102 +86,102 @@ def check_keyword_v12(ten_camp, keyword_string):
         if match_group: return True 
     return False 
 
-def safe_write_sheet(worksheet, rows):
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            worksheet.append_rows(rows)
-            return True, None
-        except Exception as e:
-            time.sleep(3) 
-            if attempt == max_retries - 1:
-                return False, str(e)
-    return False, "Unknown Error"
-
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V34: Relay Race Mode (Auto-Redirect)</h1>
+    <h1>Bot V35: Local Download Mode</h1>
     <ul>
-        <li><a href='/fb-daily'>/fb-daily</a>: Báo cáo Theo Ngày (Chạy tiếp sức)</li>
+        <li><a href='/fb-download'>/fb-download</a>: Tải báo cáo Excel (CSV) về máy</li>
     </ul>
     """
 
-@app.route('/fb-daily')
-def lay_data_hang_ngay():
-    def generate():
-        yield CSS_STYLE
-        try:
-            # Lấy tham số từ URL
-            args = request.args.to_dict()
-            keyword = args.get('keyword', '')
-            ten_tab = args.get('sheet', 'BaoCaoTungNgay')
-            start_date_str = args.get('start')
-            end_date_str = args.get('end')
-            
-            if not start_date_str or not end_date_str:
-                yield "<div class='log error'>[LỖI] Phải nhập start và end (YYYY-MM-DD)!</div>"
-                return
+@app.route('/fb-download')
+def download_data_ngay():
+    # Bước 1: Lấy tham số
+    args = request.args.to_dict()
+    keyword = args.get('keyword', '')
+    start_date_str = args.get('start')
+    
+    # Nếu chưa có ngày start, báo lỗi
+    if not start_date_str:
+        return "<h3>LỖI: Vui lòng nhập ngày bắt đầu (?start=YYYY-MM-DD)</h3>"
 
-            # Xử lý ngày hiện tại (Chỉ xử lý đúng 1 ngày start)
-            current_date_obj = datetime.strptime(start_date_str, "%Y-%m-%d")
-            end_date_obj = datetime.strptime(end_date_str, "%Y-%m-%d")
-            
-            yield f"<h3>> ĐANG XỬ LÝ NGÀY: {start_date_str} (V34)</h3>"
-            
-            # --- GỌI HÀM XỬ LÝ 1 NGÀY ---
-            yield from process_single_day(keyword, ten_tab, start_date_str)
-            
-            # --- TÍNH TOÁN NGÀY TIẾP THEO ---
-            next_date_obj = current_date_obj + timedelta(days=1)
-            
-            if next_date_obj <= end_date_obj:
-                # Tạo link cho ngày tiếp theo
-                next_date_str = next_date_obj.strftime("%Y-%m-%d")
-                args['start'] = next_date_str # Cập nhật ngày bắt đầu mới
-                next_url = request.path + '?' + urlencode(args)
-                
-                yield f"<div class='redirect-msg'>⏳ Đang chuyển sang ngày {next_date_str} trong 3 giây...</div>"
-                yield f"""
-                <script>
-                    setTimeout(function() {{
-                        window.location.href = "{next_url}";
-                    }}, 3000);
-                </script>
-                """
-                yield f"<br><a href='{next_url}' class='next-btn'>👉 Bấm vào đây nếu không tự chuyển</a>"
-            else:
-                yield "<div class='log success' style='margin-top:20px; font-size:16px;'>🎉🎉🎉 ĐÃ HOÀN THÀNH TẤT CẢ! (Finish)</div>"
+    # Bước 2: Xử lý dữ liệu (Chỉ quét 1 ngày)
+    csv_content, row_count = process_single_day_csv(keyword, start_date_str)
 
-        except Exception as e:
-             yield f"<div class='log error'>[CRASH] {traceback.format_exc()}</div>"
-    return Response(stream_with_context(generate()))
+    # Bước 3: Tạo phản hồi (Response) để tải file
+    # Nếu có tham số 'next' -> Nghĩa là đang trong vòng lặp tự động
+    # Nhưng vì tải file sẽ chiếm quyền điều khiển của trình duyệt, ta cần 1 trang trung gian
+    
+    # Để đơn giản cho Sếp:
+    # Code này sẽ trả về 1 trang HTML.
+    # Trang này sẽ tự động kích hoạt tải file.
+    # Sau đó tự động chuyển sang ngày tiếp theo.
+
+    end_date_str = args.get('end', start_date_str) # Nếu ko có end thì end = start
+    current_date_obj = datetime.strptime(start_date_str, "%Y-%m-%d")
+    end_date_obj = datetime.strptime(end_date_str, "%Y-%m-%d")
+    
+    # Tính ngày tiếp theo
+    next_date_obj = current_date_obj + timedelta(days=1)
+    next_link = ""
+    status_msg = "Đã hoàn tất toàn bộ!"
+
+    if next_date_obj <= end_date_obj:
+        next_date_str = next_date_obj.strftime("%Y-%m-%d")
+        args['start'] = next_date_str
+        next_link = request.path + '?' + urlencode(args)
+        status_msg = f"Đang chuyển sang ngày {next_date_str}..."
+
+    # Encode CSV sang base64 hoặc để trong biến JS để tải
+    # Cách tốt nhất: Dùng Blob trong JS để tạo file tải xuống mà không cần server lưu file
+    
+    import base64
+    b64_csv = base64.b64encode(csv_content.encode('utf-8-sig')).decode()
+    filename = f"Baocao_{start_date_str}.csv"
+
+    html_response = f"""
+    <html>
+    <head>{CSS_STYLE}</head>
+    <body>
+        <h2>📊 Đã quét xong ngày: <span class="highlight">{start_date_str}</span></h2>
+        <div class="info">Tìm thấy: {row_count} dòng dữ liệu.</div>
+        
+        <a id="downloadLink" class="download-btn" download="{filename}" href="data:text/csv;charset=utf-8;base64,{b64_csv}">
+            📥 Tải File {filename}
+        </a>
+
+        <div class="auto-msg" id="statusMsg">{status_msg}</div>
+
+        <script>
+            // 1. Tự động bấm nút tải
+            document.getElementById('downloadLink').click();
+
+            // 2. Tự động chuyển trang sau 3 giây (nếu còn ngày tiếp theo)
+            var nextLink = "{next_link}";
+            if (nextLink) {{
+                setTimeout(function() {{
+                    window.location.href = nextLink;
+                }}, 3000); // Đợi 3s để file kịp tải
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    
+    return html_response
 
 # ======================================================
-# LOGIC XỬ LÝ 1 NGÀY (Gọn nhẹ)
+# LOGIC XỬ LÝ CSV (KHÔNG DÙNG GSPREAD)
 # ======================================================
-def process_single_day(keyword, ten_tab, current_date_str):
-    yield f"<div class='log info'>[SHEET] Connecting...</div>"
+def process_single_day_csv(keyword, current_date_str):
+    # Tạo bộ nhớ đệm cho CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
     
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-    client = gspread.authorize(creds)
-    
-    try:
-        sh = client.open(FILE_SHEET_GOC) 
-        # yield f"<div class='log success'>[SHEET] Connected!</div>"
-    except Exception as e:
-        yield f"<div class='log error'>[SHEET ERROR] {str(e)}</div>"
-        return
-
+    # Ghi Header
     HEADERS = ["Ngày", "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS", "Lượt mua", "AOV", "Rev/Data", "ThruPlay", "View 25%", "View 100%", "Từ khóa (Tag)"]
-
-    try:
-        worksheet = sh.worksheet(ten_tab)
-    except:
-        yield f"<div class='log warning'>[SHEET] Creating new tab '{ten_tab}'...</div>"
-        worksheet = sh.add_worksheet(title=ten_tab, rows=100, cols=20)
-        worksheet.append_row(HEADERS)
+    writer.writerow(HEADERS)
 
     KEYWORD_GROUPS = [k.strip() for k in keyword.split(',') if k.strip()]
     fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
@@ -192,7 +189,7 @@ def process_single_day(keyword, ten_tab, current_date_str):
     time_str = f'insights.time_range({json.dumps(range_dict)})'
     fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
-    BUFFER_ROWS = [] 
+    total_rows = 0
 
     for tk_obj in DANH_SACH_TKQC:
         id_tk = tk_obj['id']
@@ -208,9 +205,7 @@ def process_single_day(keyword, ten_tab, current_date_str):
             try:
                 res = requests.get(next_url, params=params if next_url == base_url else None, timeout=10)
                 data = res.json()
-                if 'error' in data:
-                    yield f"<div class='log error'>[ERROR] {ten_tk}: {data['error']['message']}</div>"
-                    break
+                if 'error' in data: break
                 all_campaigns.extend(data.get('data', []))
                 if 'paging' in data and 'next' in data['paging']:
                     next_url = data['paging']['next']
@@ -256,17 +251,10 @@ def process_single_day(keyword, ten_tab, current_date_str):
                         else: matched_tag = "All"
 
                         row = [current_date_str, id_tk, ten_tk, ten_camp, trang_thai, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100, matched_tag]
-                        BUFFER_ROWS.append(row)
+                        writer.writerow(row)
+                        total_rows += 1
 
-    if BUFFER_ROWS:
-        yield f"<div class='log warning'>[WRITE] Đang ghi {len(BUFFER_ROWS)} dòng...</div>"
-        success, err = safe_write_sheet(worksheet, BUFFER_ROWS)
-        if success:
-            yield f"<div class='log success'>✅ OK Ngày {current_date_str}.</div>"
-        else:
-            yield f"<div class='log error'>❌ Lỗi ghi: {err}</div>"
-    else:
-        yield f"<div class='log info'>[SKIP] Ngày {current_date_str} không có dữ liệu.</div>"
+    return output.getvalue(), total_rows
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
