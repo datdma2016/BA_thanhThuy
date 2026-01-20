@@ -239,4 +239,34 @@ def process_single_day(keyword, ten_tab, current_date_str):
                         thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
                         if thruplay == 0: thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
                         view25 = get_fb_value(actions, ['video_p25_watched_actions'])
-                        if view25 == 0: view25 = get_fb_value(stat.get('video_p25_watched_actions', []),
+                        if view25 == 0: view25 = get_fb_value(stat.get('video_p25_watched_actions', []), ['video_view', 'video_play'])
+                        view100 = get_fb_value(actions, ['video_p100_watched_actions'])
+                        if view100 == 0: view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
+                        gia_data = round(spend / total_data) if total_data > 0 else 0
+                        roas = (revenue / spend) if spend > 0 else 0
+                        aov = round(revenue / orders) if orders > 0 else 0
+                        rev_per_data = round(revenue / total_data) if total_data > 0 else 0
+                        
+                        matched_tag = "Other"
+                        if len(KEYWORD_GROUPS) > 0:
+                            for kw_group in KEYWORD_GROUPS:
+                                    if check_keyword_v12(ten_camp, kw_group):
+                                        matched_tag = kw_group
+                                        break
+                        else: matched_tag = "All"
+
+                        row = [current_date_str, id_tk, ten_tk, ten_camp, trang_thai, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100, matched_tag]
+                        BUFFER_ROWS.append(row)
+
+    if BUFFER_ROWS:
+        yield f"<div class='log warning'>[WRITE] Đang ghi {len(BUFFER_ROWS)} dòng...</div>"
+        success, err = safe_write_sheet(worksheet, BUFFER_ROWS)
+        if success:
+            yield f"<div class='log success'>✅ OK Ngày {current_date_str}.</div>"
+        else:
+            yield f"<div class='log error'>❌ Lỗi ghi: {err}</div>"
+    else:
+        yield f"<div class='log info'>[SKIP] Ngày {current_date_str} không có dữ liệu.</div>"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
