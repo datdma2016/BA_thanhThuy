@@ -36,24 +36,25 @@ def ket_noi_sheet_tab(ten_tab_moi):
 
 @app.route('/')
 def home():
-    return "<h1>Bot V6: Đã sửa lỗi Invalid Parameter!</h1>"
+    return "<h1>Bot V7 (Final): Chế độ 'Xe Ủi' - Quét sạch không chừa một ai!</h1>"
 
 @app.route('/fb-ads')
 def lay_data_fb():
     try:
         # --- THAM SỐ TỪ LINK ---
         keyword = request.args.get('keyword', '')
-        ten_tab = request.args.get('sheet', 'BaoCaoV6_Fix')
+        ten_tab = request.args.get('sheet', 'BaoCaoV7_Final')
         start_date = request.args.get('start')
         end_date = request.args.get('end')
         date_preset = request.args.get('date', 'today')
 
-        # --- XỬ LÝ THỜI GIAN ---
+        # --- XỬ LÝ THỜI GIAN (Sửa lại dấu nháy kép cho chuẩn JSON) ---
         if start_date and end_date:
-            time_param = f"insights.time_range({{'since':'{start_date}','until':'{end_date}'}})"
+            # Dùng dấu nháy kép " thay vì nháy đơn ' để Facebook dễ đọc
+            time_param = f'insights.time_range({{"since":"{start_date}","until":"{end_date}"}})'
             thoi_gian_bao_cao = f"{start_date} đến {end_date}"
         else:
-            time_param = f"insights.date_preset({date_preset})"
+            time_param = f'insights.date_preset({date_preset})'
             thoi_gian_bao_cao = date_preset
 
         # --- BẮT ĐẦU QUÉT ---
@@ -66,18 +67,18 @@ def lay_data_fb():
         for id_tk in DANH_SACH_TKQC:
             base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
             
-            # Cấu hình lấy dữ liệu
+            # Cấu hình fields
             fields = f'name,status,{time_param}{{spend,impressions,clicks,cpc,ctr}}'
             
-            # ĐÃ SỬA: Xóa 'level' và chuẩn hóa effective_status
+            # --- CẤU HÌNH ĐƠN GIẢN NHẤT (ĐỂ KHÔNG BỊ LỖI PARAM) ---
+            # Bỏ hoàn toàn effective_status -> Lấy TẤT CẢ (Active, Paused, Deleted...)
             params = {
                 'fields': fields,
                 'access_token': FB_ACCESS_TOKEN,
-                'limit': 500,
-                'effective_status': '["ACTIVE","PAUSED","DELETED","ARCHIVED"]',
+                'limit': 500, # Mỗi lần xúc 500 ông
             }
             
-            # --- THUẬT TOÁN LẬT TRANG (GIỮ NGUYÊN) ---
+            # --- THUẬT TOÁN LẬT TRANG ---
             all_campaigns = []
             next_url = base_url
             trang_thu = 1
@@ -86,65 +87,6 @@ def lay_data_fb():
                 if trang_thu == 1:
                     response = requests.get(next_url, params=params)
                 else:
-                    response = requests.get(next_url) # Trang sau dùng link có sẵn
+                    response = requests.get(next_url)
                 
-                data = response.json()
-                
-                if 'error' in data:
-                    nhat_ky_quet.append(f"<li style='color:red'>TK {id_tk} lỗi: {data['error']['message']}</li>")
-                    break
-                
-                batch_data = data.get('data', [])
-                all_campaigns.extend(batch_data)
-                
-                if 'paging' in data and 'next' in data['paging']:
-                    next_url = data['paging']['next']
-                    trang_thu += 1
-                else:
-                    break 
-            
-            # --- TÍNH TOÁN ---
-            dem_camp_co_tien = 0
-            
-            for camp in all_campaigns:
-                ten_camp = camp.get('name', 'Không tên')
-                trang_thai = camp.get('status', 'UNKNOWN')
-                
-                if keyword.lower() in ten_camp.lower():
-                    insights_data = camp.get('insights', {}).get('data', [])
-                    
-                    if insights_data:
-                        stat = insights_data[0]
-                        spend = float(stat.get('spend', 0))
-                        clicks = stat.get('clicks', 0)
-                        ctr = float(stat.get('ctr', 0))
-                        
-                        if spend > 0:
-                            row = [id_tk, ten_camp, trang_thai, thoi_gian_bao_cao, spend, clicks, ctr]
-                            sheet.append_row(row)
-                            tong_tien_all += spend
-                            dem_camp_co_tien += 1
-                            ket_qua_hien_thi.append(f"<li>[{id_tk}] {ten_camp}: {spend:,.0f}đ</li>")
-            
-            nhat_ky_quet.append(f"<li style='color:blue'>TK {id_tk}: Quét xong {len(all_campaigns)} camp (qua {trang_thu} trang). Lấy được {dem_camp_co_tien} camp có tiền.</li>")
-
-        html = f"""
-        <h3>Báo cáo V6 (Đã Fix Lỗi)</h3>
-        <ul>
-            <li><b>Tổng tiền chuẩn:</b> <span style="color:red; font-size:24px; font-weight:bold">{tong_tien_all:,.0f} VNĐ</span></li>
-            <li><b>Thời gian:</b> {thoi_gian_bao_cao}</li>
-        </ul>
-        <hr>
-        <h4>Nhật ký hệ thống:</h4>
-        <ul>{''.join(nhat_ky_quet)}</ul>
-        <hr>
-        <h4>Chi tiết:</h4>
-        <ul>{''.join(ket_qua_hien_thi)}</ul>
-        """
-        return html
-
-    except Exception as e:
-        return f"Lỗi: {str(e)}"
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+                data = response.json
