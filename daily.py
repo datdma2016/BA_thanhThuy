@@ -12,13 +12,11 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 
 # ======================================================
-# 1. CẤU HÌNH (SẾP CHỈ CẦN SỬA Ở ĐÂY)
+# 1. CẤU HÌNH
 # ======================================================
 
-FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
-
-# Tên file Google Sheet (Sếp tự Share quyền & Điền tên vào đây)
-FILE_SHEET_GOC = "BA_ads_daily_20260120" 
+FB_ACCESS_TOKEN = "DÁN_TOKEN_CỦA_BẠN_VÀO_ĐÂY" 
+FILE_SHEET_GOC = "pancakeTest_260120" 
 
 DANH_SACH_TKQC = [
     {"id": "581662847745376", "name": "tick_xanh_001"}, 
@@ -72,11 +70,6 @@ def get_fb_value(data_list, keys_target, value_key='value'):
     return 0
 
 def check_keyword_v12(ten_camp, keyword_string):
-    """
-    Logic lọc:
-    - Nếu không nhập keyword -> Trả về True (Lấy hết).
-    - Nếu có keyword -> Phải thỏa mãn logic AND/OR/NOT.
-    """
     if not keyword_string: return True
     ten_camp_lower = ten_camp.lower()
     or_groups = keyword_string.split(',') 
@@ -105,7 +98,7 @@ def check_keyword_v12(ten_camp, keyword_string):
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V23: Full Features (Fixed File: {FILE_SHEET_GOC})</h1>
+    <h1>Bot V24: Batch Save (Anti-Crash)</h1>
     <ul>
         <li><a href='/fb-ads'>/fb-ads</a>: Báo cáo Tổng Hợp</li>
         <li><a href='/fb-daily'>/fb-daily</a>: Báo cáo Theo Ngày</li>
@@ -149,7 +142,7 @@ def lay_data_hang_ngay():
     return Response(stream_with_context(generate()))
 
 # ======================================================
-# CORE PROCESS
+# CORE PROCESS (BATCH SAVE LOGIC)
 # ======================================================
 def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='total'):
     # 1. Time Param
@@ -164,7 +157,7 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
     if mode == 'daily':
         time_str += ".time_increment(1)"
     
-    # 2. Kết nối Sheet (DÙNG BIẾN CỐ ĐỊNH FILE_SHEET_GOC)
+    # 2. Kết nối Sheet
     yield f"<div class='log info'>[SHEET] Connecting to '{FILE_SHEET_GOC}'...</div>"
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
@@ -198,16 +191,17 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         worksheet = sh.add_worksheet(title=ten_tab, rows=100, cols=20)
         worksheet.append_row(HEADERS)
 
-    # 3. Quét Data
+    # 3. Quét Data & Ghi Cuốn Chiếu
     KEYWORD_GROUPS = [k.strip() for k in keyword.split(',') if k.strip()]
-    BUFFER_ROWS = []
     
     fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
     fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
     for i, tk_obj in enumerate(DANH_SACH_TKQC):
+        BUFFER_ROWS = [] # Reset buffer cho mỗi tài khoản
+
         if i > 0: 
-            sleep_time = random.uniform(3, 6)
+            sleep_time = random.uniform(2, 4) # Giảm thời gian nghỉ xuống xíu cho nhanh
             yield f"<div class='log sleep'>[SLEEP] Nghỉ {sleep_time:.1f}s...</div>"
             yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
             time.sleep(sleep_time)
@@ -222,6 +216,7 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         all_campaigns = []
         next_url = base_url
         
+        # Lấy hết Campaign của TK này
         while True:
             try:
                 res = requests.get(next_url, params=params if next_url == base_url else None)
@@ -240,7 +235,6 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
             ten_camp = camp.get('name', 'Không tên')
             trang_thai = camp.get('status', 'UNKNOWN')
             
-            # --- ÁP DỤNG BỘ LỌC TỪ KHÓA Ở ĐÂY ---
             if check_keyword_v12(ten_camp, keyword):
                 insights_data = camp.get('insights', {}).get('data', [])
                 if insights_data:
@@ -271,7 +265,6 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                             aov = round(revenue / orders) if orders > 0 else 0
                             rev_per_data = round(revenue / total_data) if total_data > 0 else 0
                             
-                            # XÁC ĐỊNH TAG
                             matched_tag = "Other"
                             if len(KEYWORD_GROUPS) > 0:
                                 for kw_group in KEYWORD_GROUPS:
@@ -289,19 +282,22 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                             BUFFER_ROWS.append(row)
                     count_camp += 1
         
-        yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp} camps processed.</div>"
+        yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp} camps matched.</div>"
+        
+        # --- QUAN TRỌNG: GHI DỮ LIỆU NGAY SAU KHI XONG 1 TÀI KHOẢN ---
+        if BUFFER_ROWS:
+            yield f"<div class='log warning'>[WRITE] Saving {len(BUFFER_ROWS)} rows for {ten_tk}...</div>"
+            try:
+                worksheet.append_rows(BUFFER_ROWS)
+                yield f"<div class='log success'>[SAVED] Đã lưu xong {ten_tk}!</div>"
+            except Exception as e:
+                yield f"<div class='log error'>[FATAL] Sheet Error: {str(e)}</div>"
+        else:
+            yield f"<div class='log info'>[SKIP] {ten_tk} không có dữ liệu cần lưu.</div>"
+            
         yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
-    # 4. Ghi Sheet
-    if BUFFER_ROWS:
-        yield f"<div class='log warning'>[WRITE] Writing {len(BUFFER_ROWS)} rows to '{FILE_SHEET_GOC}'...</div>"
-        try:
-            worksheet.append_rows(BUFFER_ROWS)
-            yield f"<div class='log success'>[SUCCESS] Saved to Tab: {ten_tab}!</div>"
-        except Exception as e:
-            yield f"<div class='log error'>[FATAL] Sheet Error: {str(e)}</div>"
-    else:
-        yield f"<div class='log info'>No data found.</div>"
+    yield f"<div class='log success' style='margin-top:20px; border-top:1px solid #30363d; padding-top:10px;'>✅ ĐÃ HOÀN THÀNH TẤT CẢ!</div>"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
