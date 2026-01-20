@@ -5,6 +5,7 @@ import shlex
 import time
 import io
 import csv
+import random
 from urllib.parse import urlencode
 from flask import Flask, request, jsonify, Response, stream_with_context
 from datetime import datetime, timedelta
@@ -34,7 +35,16 @@ DANH_SACH_TKQC = [
 CSS_STYLE = """
 <style>
     body { background-color: #0d1117; color: #c9d1d9; font-family: 'Consolas', monospace; padding: 20px; font-size: 13px; }
-    .log { margin-bottom: 4px; border-bottom: 1px dashed #21262d; padding: 2px 0; }
+    .log-container { 
+        border: 1px dashed #30363d; 
+        padding: 10px; 
+        margin-top: 15px; 
+        max-height: 400px; 
+        overflow-y: auto; 
+        background: #161b22;
+        border-radius: 6px;
+    }
+    .log-entry { border-bottom: 1px solid #21262d; padding: 5px 0; }
     .success { color: #3fb950; }
     .error { color: #f85149; }
     .warning { color: #d29922; }
@@ -46,6 +56,11 @@ CSS_STYLE = """
         margin-top: 15px; font-size: 14px; font-weight: bold;
     }
     .auto-msg { color: #e3b341; margin-top: 10px; font-style: italic; }
+    .clear-btn {
+        background: #da3633; color: white; padding: 5px 10px;
+        text-decoration: none; border-radius: 4px; display: inline-block;
+        font-size: 11px; margin-bottom: 5px; cursor: pointer;
+    }
 </style>
 """
 
@@ -89,9 +104,9 @@ def check_keyword_v12(ten_camp, keyword_string):
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V36: Local Download (Robust Mode)</h1>
+    <h1>Bot V38: Random Sleep + Persistent Log</h1>
     <ul>
-        <li><a href='/fb-download'>/fb-download</a>: Tải báo cáo CSV (Đã fix lỗi mất data)</li>
+        <li><a href='/fb-download'>/fb-download</a>: Bắt đầu tải (Nhớ thêm ?start=...&end=...)</li>
     </ul>
     """
 
@@ -104,7 +119,7 @@ def download_data_ngay():
     if not start_date_str:
         return "<h3>LỖI: Vui lòng nhập ngày bắt đầu (?start=YYYY-MM-DD)</h3>"
 
-    # Bước 1: Quét dữ liệu (Code V36 mạnh mẽ hơn)
+    # Bước 1: Quét dữ liệu (Code V38)
     csv_content, row_count, debug_info = process_single_day_csv(keyword, start_date_str)
 
     # Bước 2: Chuẩn bị chuyển trang
@@ -120,19 +135,26 @@ def download_data_ngay():
         next_date_str = next_date_obj.strftime("%Y-%m-%d")
         args['start'] = next_date_str
         next_link = request.path + '?' + urlencode(args)
-        status_msg = f"Đang chuyển sang ngày {next_date_str}..."
+        status_msg = f"⏳ Đang chuyển sang ngày {next_date_str}..."
 
     import base64
     b64_csv = base64.b64encode(csv_content.encode('utf-8-sig')).decode()
     filename = f"Baocao_{start_date_str}.csv"
 
+    # Tạo nội dung log cho ngày hiện tại
+    current_log_html = f"""
+    <div class='log-entry'>
+        <span class='highlight'>[{start_date_str}]</span>: Tìm thấy <b>{row_count}</b> dòng.
+        <br><span style='font-size:11px; color:#888;'>{debug_info}</span>
+    </div>
+    """
+
+    # HTML trả về có chứa JavaScript để xử lý Log Bất Tử
     html_response = f"""
     <html>
     <head>{CSS_STYLE}</head>
     <body>
         <h2>📊 Đã quét xong ngày: <span class="highlight">{start_date_str}</span></h2>
-        <div class="info">Tìm thấy: {row_count} dòng khớp từ khóa.</div>
-        <div class="log" style="font-size:11px; color:#888; max-height:100px; overflow:auto;">{debug_info}</div>
         
         <a id="downloadLink" class="download-btn" download="{filename}" href="data:text/csv;charset=utf-8;base64,{b64_csv}">
             📥 Tải File {filename}
@@ -140,13 +162,44 @@ def download_data_ngay():
 
         <div class="auto-msg" id="statusMsg">{status_msg}</div>
 
+        <h3>📜 Nhật ký hoạt động:</h3>
+        <button class="clear-btn" onclick="clearLog()">🗑️ Xóa Nhật Ký</button>
+        <div id="persistentLog" class="log-container">Loading log...</div>
+
         <script>
+            // 1. Tự động tải file
             document.getElementById('downloadLink').click();
+
+            // 2. Xử lý LOG BẤT TỬ (Session Storage)
+            var newLogEntry = `{current_log_html}`;
+            var existingLog = sessionStorage.getItem('botLog_v38') || "";
+            
+            // Thêm log mới vào đầu hoặc cuối (ở đây chọn thêm vào cuối)
+            var updatedLog = existingLog + newLogEntry;
+            sessionStorage.setItem('botLog_v38', updatedLog);
+            
+            // Hiển thị ra màn hình
+            document.getElementById('persistentLog').innerHTML = updatedLog;
+            
+            // Tự động cuộn xuống dưới cùng
+            var logDiv = document.getElementById('persistentLog');
+            logDiv.scrollTop = logDiv.scrollHeight;
+
+            // Hàm xóa log nếu muốn
+            function clearLog() {{
+                sessionStorage.removeItem('botLog_v38');
+                document.getElementById('persistentLog').innerHTML = "";
+            }}
+
+            // 3. Tự động chuyển trang (Random Sleep cho trình duyệt 1 xíu cho chắc)
             var nextLink = "{next_link}";
             if (nextLink) {{
+                // Random từ 2000ms đến 4000ms trước khi chuyển trang
+                var delay = Math.floor(Math.random() * 2000) + 2000;
+                console.log("Redirecting in " + delay + "ms");
                 setTimeout(function() {{
                     window.location.href = nextLink;
-                }}, 3000); 
+                }}, delay); 
             }}
         </script>
     </body>
@@ -155,7 +208,7 @@ def download_data_ngay():
     return html_response
 
 # ======================================================
-# LOGIC XỬ LÝ CSV (FIXED RETRY)
+# LOGIC XỬ LÝ CSV (CÓ RANDOM SLEEP)
 # ======================================================
 def process_single_day_csv(keyword, current_date_str):
     output = io.StringIO()
@@ -172,18 +225,22 @@ def process_single_day_csv(keyword, current_date_str):
     total_rows = 0
     debug_log = ""
 
-    for tk_obj in DANH_SACH_TKQC:
+    for i, tk_obj in enumerate(DANH_SACH_TKQC):
+        # --- 1. RANDOM SLEEP KHI CHUYỂN TÀI KHOẢN (1-3 giây) ---
+        if i > 0:
+            sleep_s = random.uniform(1, 3)
+            time.sleep(sleep_s)
+            
         id_tk = tk_obj['id']
         ten_tk = tk_obj['name']
         
         base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
-        params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500} # Lấy 500 thằng 1 lần
+        params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500}
         
         all_campaigns = []
         next_url = base_url
         page_count = 0
         
-        # --- CƠ CHẾ RETRY MẠNH MẼ ---
         while True:
             retries = 3
             success = False
@@ -193,8 +250,8 @@ def process_single_day_csv(keyword, current_date_str):
                     data = res.json()
                     
                     if 'error' in data:
-                        debug_log += f"<br>[ERROR] {ten_tk}: {data['error']['message']}"
-                        retries = 0 # Lỗi Token thì dừng luôn
+                        debug_log += f" | ❌ {ten_tk}: {data['error']['message']}"
+                        retries = 0 
                         break
                     
                     fetched = data.get('data', [])
@@ -203,21 +260,27 @@ def process_single_day_csv(keyword, current_date_str):
                     
                     if 'paging' in data and 'next' in data['paging']:
                         next_url = data['paging']['next']
-                        success = True # Lấy thành công trang này, chuẩn bị lấy trang sau
-                        break # Thoát vòng lặp retry
+                        success = True 
+                        break 
                     else:
-                        next_url = None # Hết trang
+                        next_url = None 
                         success = True
                         break
                 except Exception as e:
                     retries -= 1
-                    debug_log += f"<br>[RETRY] {ten_tk} Page {page_count}: {str(e)} (Còn {retries} lần)"
-                    time.sleep(2)
+                    # --- 2. RANDOM SLEEP KHI RETRY (2-5 giây) ---
+                    retry_sleep = random.uniform(2, 5)
+                    time.sleep(retry_sleep)
             
             if not success or not next_url:
                 break
+            
+            # --- 3. RANDOM SLEEP SAU MỖI TRANG (1-2 giây) ---
+            # Để tránh gọi API quá dồn dập
+            time.sleep(random.uniform(1, 2))
         
-        debug_log += f"<br>✅ {ten_tk}: Quét được tổng {len(all_campaigns)} campaigns gốc."
+        # Ghi log ngắn gọn
+        debug_log += f" | ✅ {ten_tk}: {len(all_campaigns)}"
 
         for camp in all_campaigns:
             ten_camp = camp.get('name', 'Không tên')
@@ -229,9 +292,7 @@ def process_single_day_csv(keyword, current_date_str):
                     stat = insights_data[0] 
                     spend = float(stat.get('spend', 0))
                     
-                    # --- ĐIỀU CHỈNH: Bỏ qua check > 0 nếu cần kiểm tra chiến dịch "ẩn" ---
-                    # if spend >= 0: # Lấy hết kể cả 0 đồng để kiểm tra
-                    
+                    # Lấy hết data (kể cả spend = 0)
                     reach = int(stat.get('reach', 0))
                     actions = stat.get('actions', [])
                     action_values = stat.get('action_values', [])
