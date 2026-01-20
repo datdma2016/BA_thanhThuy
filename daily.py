@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
 FILE_SHEET_GOC = "BA_ads_daily_20260120" 
-BATCH_SIZE = 20 # <--- Cứ đủ 20 dòng là ghi ngay lập tức
+BATCH_SIZE = 50 # <--- Tăng lên 50 để giảm số lần gọi Google
 
 DANH_SACH_TKQC = [
     {"id": "581662847745376", "name": "tick_xanh_001"}, 
@@ -42,9 +42,10 @@ CSS_STYLE = """
     .warning { color: #d29922; }
     .info { color: #8b949e; }
     .debug { color: #79c0ff; font-weight: bold; }
+    .progress { color: #e3b341; font-weight: bold; }
     .sleep { color: #d2a8ff; font-style: italic; }
     .highlight { color: #58a6ff; font-weight: bold; }
-    .heartbeat { color: #30363d; font-size: 10px; }
+    .heartbeat { color: #8b949e; font-size: 10px; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #161b22; font-size: 12px; }
     th, td { border: 1px solid #30363d; padding: 8px; text-align: right; }
     th { background-color: #21262d; text-align: center; color: #f0f6fc; }
@@ -98,10 +99,24 @@ def check_keyword_v12(ten_camp, keyword_string):
         if match_group: return True 
     return False 
 
+# --- HÀM GHI SHEET AN TOÀN (RETRY LOGIC) ---
+def safe_write_sheet(worksheet, rows):
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            worksheet.append_rows(rows)
+            time.sleep(1) # Nghỉ 1s sau khi ghi để tránh spam Google
+            return True, None
+        except Exception as e:
+            time.sleep(5) # Nếu lỗi, nghỉ 5s rồi thử lại
+            if attempt == max_retries - 1:
+                return False, str(e)
+    return False, "Unknown Error"
+
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V26: Batch Streaming (Max Stability)</h1>
+    <h1>Bot V28: Anti-Quota Google (Fix Row 60 Stop)</h1>
     <ul>
         <li><a href='/fb-ads'>/fb-ads</a>: Báo cáo Tổng Hợp</li>
         <li><a href='/fb-daily'>/fb-daily</a>: Báo cáo Theo Ngày</li>
@@ -194,6 +209,7 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
     fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
     for i, tk_obj in enumerate(DANH_SACH_TKQC):
+        BUFFER_ROWS = [] 
         if i > 0: 
             sleep_time = random.uniform(2, 3)
             yield f"<div class='log sleep'>[SLEEP] Nghỉ {sleep_time:.1f}s...</div>"
@@ -209,9 +225,7 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         
         all_campaigns = []
         next_url = base_url
-        BUFFER_ROWS = [] # Bộ nhớ đệm tạm thời
-
-        # 1. LẤY HẾT CAMPAIGN VỀ TRƯỚC (ĐỂ ĐẢM BẢO LOGIC LỌC)
+        
         while True:
             try:
                 yield "<span class='heartbeat'>.</span>" 
@@ -227,12 +241,17 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                 else: break
             except: break
 
-        count_camp = 0
-        total_found = len(all_campaigns)
-        yield f"<div class='log debug'>[DEBUG] {ten_tk}: Found {total_found} campaigns. Processing & Streaming...</div>"
+        total_camp = len(all_campaigns)
+        yield f"<div class='log debug'>[DEBUG] {ten_tk}: Found {total_camp} campaigns. Processing...</div>"
 
-        # 2. XỬ LÝ VÀ GHI NGAY LẬP TỨC (STREAMING)
+        processed_count = 0 
+        
         for camp in all_campaigns:
+            processed_count += 1
+            if processed_count % 50 == 0: # Cập nhật log mỗi 50 camp
+                yield f"<div class='log progress'>[TIẾN ĐỘ] Đã xử lý {processed_count}/{total_camp} chiến dịch...</div>"
+                yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
+
             ten_camp = camp.get('name', 'Không tên')
             trang_thai = camp.get('status', 'UNKNOWN')
             
@@ -240,28 +259,23 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                 insights_data = camp.get('insights', {}).get('data', [])
                 if insights_data:
                     for stat in insights_data:
-                        # ... (Đoạn lấy data giữ nguyên) ...
                         spend = float(stat.get('spend', 0))
                         if spend > 0:
+                            # ... (Đoạn lấy data giữ nguyên) ...
                             reach = int(stat.get('reach', 0))
                             actions = stat.get('actions', [])
                             action_values = stat.get('action_values', [])
-
                             cmts = get_fb_value(actions, ['comment'])
                             msgs = get_fb_value(actions, ['onsite_conversion.messaging_conversation_started_7d', 'messaging_conversation_started_7d'])
                             total_data = cmts + msgs
                             revenue = get_fb_value(action_values, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
                             orders = get_fb_value(actions, ['purchase', 'omni_purchase', 'offsite_conversion.fb_pixel_purchase'])
-                            
                             thruplay = get_fb_value(actions, ['video_thruplay_watched_actions'])
                             if thruplay == 0: thruplay = get_fb_value(stat.get('video_thruplay_watched_actions', []), ['video_view', 'video_play'])
-                            
                             view25 = get_fb_value(actions, ['video_p25_watched_actions'])
                             if view25 == 0: view25 = get_fb_value(stat.get('video_p25_watched_actions', []), ['video_view', 'video_play'])
-                            
                             view100 = get_fb_value(actions, ['video_p100_watched_actions'])
                             if view100 == 0: view100 = get_fb_value(stat.get('video_p100_watched_actions', []), ['video_view', 'video_play'])
-
                             gia_data = round(spend / total_data) if total_data > 0 else 0
                             roas = (revenue / spend) if spend > 0 else 0
                             aov = round(revenue / orders) if orders > 0 else 0
@@ -283,28 +297,25 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                             
                             BUFFER_ROWS.append(row)
 
-                            # --- CƠ CHẾ GHI NHỎ GIỌT (BATCH STREAMING) ---
-                            # Cứ đủ 20 dòng là GHI NGAY LẬP TỨC
+                            # --- GHI SHEET AN TOÀN ---
                             if len(BUFFER_ROWS) >= BATCH_SIZE:
-                                try:
-                                    yield "<span class='heartbeat'>Writing...</span>"
-                                    yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
-                                    worksheet.append_rows(BUFFER_ROWS)
-                                    BUFFER_ROWS = [] # Xóa bộ nhớ sau khi ghi
-                                except Exception as e:
-                                    yield f"<div class='log error'>[WRITE ERROR] {str(e)}</div>"
+                                yield f"<span class='heartbeat'>Writing batch ({len(BUFFER_ROWS)} rows)...</span> "
+                                yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
+                                success, err = safe_write_sheet(worksheet, BUFFER_ROWS)
+                                if success:
+                                    BUFFER_ROWS = []
+                                else:
+                                    yield f"<div class='log error'>[WRITE FAIL] {err}</div>"
 
-                    count_camp += 1
-
-        # Ghi nốt những dòng còn sót lại (chưa đủ 20 dòng)
+        # Ghi nốt phần còn lại
         if BUFFER_ROWS:
-            try:
-                worksheet.append_rows(BUFFER_ROWS)
-                yield f"<div class='log success'>[SAVED] {ten_tk}: Saved final batch.</div>"
-            except Exception as e:
-                 yield f"<div class='log error'>[WRITE ERROR] {str(e)}</div>"
+            success, err = safe_write_sheet(worksheet, BUFFER_ROWS)
+            if success:
+                yield f"<div class='log success'>[SAVED] Saved final batch.</div>"
+            else:
+                yield f"<div class='log error'>[WRITE FAIL] {err}</div>"
         
-        yield f"<div class='log info'>[DONE] {ten_tk}: Processed {count_camp} camps.</div>"
+        yield f"<div class='log info'>[DONE] {ten_tk}: Finished.</div>"
         yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
     yield f"<div class='log success' style='margin-top:20px; border-top:1px solid #30363d; padding-top:10px;'>✅ ĐÃ HOÀN THÀNH TẤT CẢ!</div>"
