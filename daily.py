@@ -17,6 +17,7 @@ app = Flask(__name__)
 
 FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
 FILE_SHEET_GOC = "BA_ads_daily_20260120" 
+BATCH_SIZE = 20 # <--- Cứ đủ 20 dòng là ghi ngay lập tức
 
 DANH_SACH_TKQC = [
     {"id": "581662847745376", "name": "tick_xanh_001"}, 
@@ -40,7 +41,7 @@ CSS_STYLE = """
     .error { color: #f85149; }
     .warning { color: #d29922; }
     .info { color: #8b949e; }
-    .debug { color: #79c0ff; font-weight: bold; } /* Màu xanh dương cho Debug */
+    .debug { color: #79c0ff; font-weight: bold; }
     .sleep { color: #d2a8ff; font-style: italic; }
     .highlight { color: #58a6ff; font-weight: bold; }
     .heartbeat { color: #30363d; font-size: 10px; }
@@ -100,7 +101,7 @@ def check_keyword_v12(ten_camp, keyword_string):
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V25: Heartbeat Mode (Anti-Timeout)</h1>
+    <h1>Bot V26: Batch Streaming (Max Stability)</h1>
     <ul>
         <li><a href='/fb-ads'>/fb-ads</a>: Báo cáo Tổng Hợp</li>
         <li><a href='/fb-daily'>/fb-daily</a>: Báo cáo Theo Ngày</li>
@@ -193,10 +194,7 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
     fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
     for i, tk_obj in enumerate(DANH_SACH_TKQC):
-        BUFFER_ROWS = [] 
-
         if i > 0: 
-            # Heartbeat Sleep: Ngủ nhưng vẫn thở
             sleep_time = random.uniform(2, 3)
             yield f"<div class='log sleep'>[SLEEP] Nghỉ {sleep_time:.1f}s...</div>"
             yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
@@ -211,39 +209,29 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         
         all_campaigns = []
         next_url = base_url
-        
-        # VÒNG LẶP LẤY DỮ LIỆU (CÓ HEARTBEAT)
+        BUFFER_ROWS = [] # Bộ nhớ đệm tạm thời
+
+        # 1. LẤY HẾT CAMPAIGN VỀ TRƯỚC (ĐỂ ĐẢM BẢO LOGIC LỌC)
         while True:
             try:
                 yield "<span class='heartbeat'>.</span>" 
                 yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
-                
                 res = requests.get(next_url, params=params if next_url == base_url else None)
                 data = res.json()
                 if 'error' in data:
-                    yield f"<div class='log error'>[ERROR] TK {ten_tk}: {data['error']['message']}</div>"
+                    yield f"<div class='log error'>[ERROR] {data['error']['message']}</div>"
                     break
-                
-                fetched_data = data.get('data', [])
-                all_campaigns.extend(fetched_data)
-                
+                all_campaigns.extend(data.get('data', []))
                 if 'paging' in data and 'next' in data['paging']:
                     next_url = data['paging']['next']
-                else: 
-                    break
-            except Exception as e: 
-                yield f"<div class='log error'>[API ERROR] {str(e)}</div>"
-                break
+                else: break
+            except: break
 
-        # --- LOG DEBUG MỚI: KIỂM TRA TỔNG SỐ CAMP ---
         count_camp = 0
         total_found = len(all_campaigns)
-        
-        if total_found == 0:
-             yield f"<div class='log warning'>[DEBUG] {ten_tk}: Facebook báo về 0 campaign (Check lại ngày xem).</div>"
-        else:
-             yield f"<div class='log debug'>[DEBUG] {ten_tk}: Tìm thấy {total_found} campaigns gốc. Đang lọc...</div>"
+        yield f"<div class='log debug'>[DEBUG] {ten_tk}: Found {total_found} campaigns. Processing & Streaming...</div>"
 
+        # 2. XỬ LÝ VÀ GHI NGAY LẬP TỨC (STREAMING)
         for camp in all_campaigns:
             ten_camp = camp.get('name', 'Không tên')
             trang_thai = camp.get('status', 'UNKNOWN')
@@ -252,6 +240,7 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                 insights_data = camp.get('insights', {}).get('data', [])
                 if insights_data:
                     for stat in insights_data:
+                        # ... (Đoạn lấy data giữ nguyên) ...
                         spend = float(stat.get('spend', 0))
                         if spend > 0:
                             reach = int(stat.get('reach', 0))
@@ -293,23 +282,29 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                                 row = [id_tk, ten_tk, ten_camp, trang_thai, thoi_gian_bao_cao, spend, reach, total_data, gia_data, revenue, roas, orders, aov, rev_per_data, thruplay, view25, view100, matched_tag]
                             
                             BUFFER_ROWS.append(row)
+
+                            # --- CƠ CHẾ GHI NHỎ GIỌT (BATCH STREAMING) ---
+                            # Cứ đủ 20 dòng là GHI NGAY LẬP TỨC
+                            if len(BUFFER_ROWS) >= BATCH_SIZE:
+                                try:
+                                    yield "<span class='heartbeat'>Writing...</span>"
+                                    yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
+                                    worksheet.append_rows(BUFFER_ROWS)
+                                    BUFFER_ROWS = [] # Xóa bộ nhớ sau khi ghi
+                                except Exception as e:
+                                    yield f"<div class='log error'>[WRITE ERROR] {str(e)}</div>"
+
                     count_camp += 1
-        
-        yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp}/{total_found} matched keywords.</div>"
-        
+
+        # Ghi nốt những dòng còn sót lại (chưa đủ 20 dòng)
         if BUFFER_ROWS:
-            yield f"<div class='log warning'>[WRITE] Saving {len(BUFFER_ROWS)} rows for {ten_tk}...</div>"
             try:
-                yield "<span class='heartbeat'>Writing...</span>"
-                yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
-                
                 worksheet.append_rows(BUFFER_ROWS)
-                yield f"<div class='log success'>[SAVED] Đã lưu xong {ten_tk}!</div>"
+                yield f"<div class='log success'>[SAVED] {ten_tk}: Saved final batch.</div>"
             except Exception as e:
-                yield f"<div class='log error'>[FATAL] Sheet Error: {str(e)}</div>"
-        else:
-            yield f"<div class='log info'>[SKIP] {ten_tk} không có dữ liệu cần lưu.</div>"
-            
+                 yield f"<div class='log error'>[WRITE ERROR] {str(e)}</div>"
+        
+        yield f"<div class='log info'>[DONE] {ten_tk}: Processed {count_camp} camps.</div>"
         yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
 
     yield f"<div class='log success' style='margin-top:20px; border-top:1px solid #30363d; padding-top:10px;'>✅ ĐÃ HOÀN THÀNH TẤT CẢ!</div>"
