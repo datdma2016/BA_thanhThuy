@@ -15,7 +15,7 @@ app = Flask(__name__)
 # 1. CẤU HÌNH
 # ======================================================
 
-FB_ACCESS_TOKEN = "DEAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
+FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
 FILE_SHEET_GOC = "BA_ads_daily_20260120" 
 
 DANH_SACH_TKQC = [
@@ -40,6 +40,7 @@ CSS_STYLE = """
     .error { color: #f85149; }
     .warning { color: #d29922; }
     .info { color: #8b949e; }
+    .debug { color: #79c0ff; font-weight: bold; } /* Màu xanh dương cho Debug */
     .sleep { color: #d2a8ff; font-style: italic; }
     .highlight { color: #58a6ff; font-weight: bold; }
     .heartbeat { color: #30363d; font-size: 10px; }
@@ -205,7 +206,6 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         ten_tk = tk_obj['name']
         yield f"<div class='log info'>[SCAN] Scanning <b>{ten_tk}</b>...</div>"
 
-        # GIẢM LIMIT XUỐNG 50 ĐỂ TRÁNH TIMEOUT
         base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
         params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 50} 
         
@@ -215,7 +215,6 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         # VÒNG LẶP LẤY DỮ LIỆU (CÓ HEARTBEAT)
         while True:
             try:
-                # Bắn tín hiệu "đang tải"
                 yield "<span class='heartbeat'>.</span>" 
                 yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
                 
@@ -228,7 +227,6 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                 fetched_data = data.get('data', [])
                 all_campaigns.extend(fetched_data)
                 
-                # Nếu không còn trang sau thì dừng
                 if 'paging' in data and 'next' in data['paging']:
                     next_url = data['paging']['next']
                 else: 
@@ -237,8 +235,14 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                 yield f"<div class='log error'>[API ERROR] {str(e)}</div>"
                 break
 
+        # --- LOG DEBUG MỚI: KIỂM TRA TỔNG SỐ CAMP ---
         count_camp = 0
-        yield f"<br><div class='log info'>[PROCESS] Found {len(all_campaigns)} campaigns. Processing...</div>"
+        total_found = len(all_campaigns)
+        
+        if total_found == 0:
+             yield f"<div class='log warning'>[DEBUG] {ten_tk}: Facebook báo về 0 campaign (Check lại ngày xem).</div>"
+        else:
+             yield f"<div class='log debug'>[DEBUG] {ten_tk}: Tìm thấy {total_found} campaigns gốc. Đang lọc...</div>"
 
         for camp in all_campaigns:
             ten_camp = camp.get('name', 'Không tên')
@@ -291,12 +295,11 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
                             BUFFER_ROWS.append(row)
                     count_camp += 1
         
-        yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp} camps matched.</div>"
+        yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp}/{total_found} matched keywords.</div>"
         
         if BUFFER_ROWS:
             yield f"<div class='log warning'>[WRITE] Saving {len(BUFFER_ROWS)} rows for {ten_tk}...</div>"
             try:
-                # Heartbeat trong lúc ghi file
                 yield "<span class='heartbeat'>Writing...</span>"
                 yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
                 
