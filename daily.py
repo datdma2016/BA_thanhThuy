@@ -15,7 +15,7 @@ app = Flask(__name__)
 # 1. CẤU HÌNH
 # ======================================================
 
-FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
+FB_ACCESS_TOKEN = "DEAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
 FILE_SHEET_GOC = "BA_ads_daily_20260120" 
 
 DANH_SACH_TKQC = [
@@ -42,6 +42,7 @@ CSS_STYLE = """
     .info { color: #8b949e; }
     .sleep { color: #d2a8ff; font-style: italic; }
     .highlight { color: #58a6ff; font-weight: bold; }
+    .heartbeat { color: #30363d; font-size: 10px; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #161b22; font-size: 12px; }
     th, td { border: 1px solid #30363d; padding: 8px; text-align: right; }
     th { background-color: #21262d; text-align: center; color: #f0f6fc; }
@@ -98,7 +99,7 @@ def check_keyword_v12(ten_camp, keyword_string):
 @app.route('/')
 def home():
     return f"""
-    <h1>Bot V24: Batch Save (Anti-Crash)</h1>
+    <h1>Bot V25: Heartbeat Mode (Anti-Timeout)</h1>
     <ul>
         <li><a href='/fb-ads'>/fb-ads</a>: Báo cáo Tổng Hợp</li>
         <li><a href='/fb-daily'>/fb-daily</a>: Báo cáo Theo Ngày</li>
@@ -116,7 +117,6 @@ def lay_data_tong_hop():
             start_date = request.args.get('start')
             end_date = request.args.get('end')
             date_preset = request.args.get('date', 'today')
-
             yield f"<div class='log info'>[INIT] File='{FILE_SHEET_GOC}' | Tab='{ten_tab}' | Mode=Total</div>"
             yield from core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='total')
         except Exception as e:
@@ -134,7 +134,6 @@ def lay_data_hang_ngay():
             start_date = request.args.get('start')
             end_date = request.args.get('end')
             date_preset = request.args.get('date', 'today')
-
             yield f"<div class='log info'>[INIT] File='{FILE_SHEET_GOC}' | Tab='{ten_tab}' | Mode=Daily</div>"
             yield from core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='daily')
         except Exception as e:
@@ -142,10 +141,9 @@ def lay_data_hang_ngay():
     return Response(stream_with_context(generate()))
 
 # ======================================================
-# CORE PROCESS (BATCH SAVE LOGIC)
+# CORE PROCESS
 # ======================================================
 def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='total'):
-    # 1. Time Param
     if start_date and end_date:
         range_dict = {'since': start_date, 'until': end_date}
         time_str = f'insights.time_range({json.dumps(range_dict)})'
@@ -157,7 +155,6 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
     if mode == 'daily':
         time_str += ".time_increment(1)"
     
-    # 2. Kết nối Sheet
     yield f"<div class='log info'>[SHEET] Connecting to '{FILE_SHEET_GOC}'...</div>"
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
@@ -167,10 +164,9 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         sh = client.open(FILE_SHEET_GOC) 
         yield f"<div class='log success'>[SHEET] Connected successfully!</div>"
     except Exception as e:
-        yield f"<div class='log error'>[SHEET ERROR] Không mở được file '{FILE_SHEET_GOC}'. Lỗi: {str(e)}</div>"
+        yield f"<div class='log error'>[SHEET ERROR] Không mở được file. Lỗi: {str(e)}</div>"
         return
 
-    # Header
     BASE_HEADERS = [
         "ID TK", "Tên TK", "Tên Chiến Dịch", "Trạng thái", 
         "Tiền tiêu", "Reach", "Data", "Giá Data", "Doanh Thu", "ROAS",
@@ -191,17 +187,16 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         worksheet = sh.add_worksheet(title=ten_tab, rows=100, cols=20)
         worksheet.append_row(HEADERS)
 
-    # 3. Quét Data & Ghi Cuốn Chiếu
     KEYWORD_GROUPS = [k.strip() for k in keyword.split(',') if k.strip()]
-    
     fields_video = "video_p25_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
     fields_list = f'name,status,{time_str}{{date_start,spend,reach,actions,action_values,purchase_roas,{fields_video}}}'
 
     for i, tk_obj in enumerate(DANH_SACH_TKQC):
-        BUFFER_ROWS = [] # Reset buffer cho mỗi tài khoản
+        BUFFER_ROWS = [] 
 
         if i > 0: 
-            sleep_time = random.uniform(2, 4) # Giảm thời gian nghỉ xuống xíu cho nhanh
+            # Heartbeat Sleep: Ngủ nhưng vẫn thở
+            sleep_time = random.uniform(2, 3)
             yield f"<div class='log sleep'>[SLEEP] Nghỉ {sleep_time:.1f}s...</div>"
             yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
             time.sleep(sleep_time)
@@ -210,27 +205,41 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         ten_tk = tk_obj['name']
         yield f"<div class='log info'>[SCAN] Scanning <b>{ten_tk}</b>...</div>"
 
+        # GIẢM LIMIT XUỐNG 50 ĐỂ TRÁNH TIMEOUT
         base_url = f"https://graph.facebook.com/v19.0/act_{id_tk}/campaigns"
-        params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 500}
+        params = {'fields': fields_list, 'access_token': FB_ACCESS_TOKEN, 'limit': 50} 
         
         all_campaigns = []
         next_url = base_url
         
-        # Lấy hết Campaign của TK này
+        # VÒNG LẶP LẤY DỮ LIỆU (CÓ HEARTBEAT)
         while True:
             try:
+                # Bắn tín hiệu "đang tải"
+                yield "<span class='heartbeat'>.</span>" 
+                yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
+                
                 res = requests.get(next_url, params=params if next_url == base_url else None)
                 data = res.json()
                 if 'error' in data:
                     yield f"<div class='log error'>[ERROR] TK {ten_tk}: {data['error']['message']}</div>"
                     break
-                all_campaigns.extend(data.get('data', []))
+                
+                fetched_data = data.get('data', [])
+                all_campaigns.extend(fetched_data)
+                
+                # Nếu không còn trang sau thì dừng
                 if 'paging' in data and 'next' in data['paging']:
                     next_url = data['paging']['next']
-                else: break
-            except: break
+                else: 
+                    break
+            except Exception as e: 
+                yield f"<div class='log error'>[API ERROR] {str(e)}</div>"
+                break
 
         count_camp = 0
+        yield f"<br><div class='log info'>[PROCESS] Found {len(all_campaigns)} campaigns. Processing...</div>"
+
         for camp in all_campaigns:
             ten_camp = camp.get('name', 'Không tên')
             trang_thai = camp.get('status', 'UNKNOWN')
@@ -284,10 +293,13 @@ def core_process(keyword, ten_tab, start_date, end_date, date_preset, mode='tota
         
         yield f"<div class='log success'>[DONE] {ten_tk}: {count_camp} camps matched.</div>"
         
-        # --- QUAN TRỌNG: GHI DỮ LIỆU NGAY SAU KHI XONG 1 TÀI KHOẢN ---
         if BUFFER_ROWS:
             yield f"<div class='log warning'>[WRITE] Saving {len(BUFFER_ROWS)} rows for {ten_tk}...</div>"
             try:
+                # Heartbeat trong lúc ghi file
+                yield "<span class='heartbeat'>Writing...</span>"
+                yield "<script>window.scrollTo(0, document.body.scrollHeight);</script>"
+                
                 worksheet.append_rows(BUFFER_ROWS)
                 yield f"<div class='log success'>[SAVED] Đã lưu xong {ten_tk}!</div>"
             except Exception as e:
