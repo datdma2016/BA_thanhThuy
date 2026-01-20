@@ -15,8 +15,8 @@ app = Flask(__name__)
 # 1. CẤU HÌNH
 # ======================================================
 
-FB_ACCESS_TOKEN = "DÁN_TOKEN_CỦA_BẠN_VÀO_ĐÂY" 
-FILE_SHEET_GOC = "pancakeTest_260120" 
+FB_ACCESS_TOKEN = "EAANPvsZANh38BQt8Bcqztr63LDZBieQxO2h5TnOIGpHQtlOnV85cwg7I2ZCVf8vFTccpbB7hX97HYOsGFEKLD3fSZC2BCyKWeZA0vsUJZCXBZAMVZARMwZCvTuPGTsIStG5ro10ltZBXs3yTOzBLjZAjfL8TAeXwgKC73ZBZA3aQD6eludndMkOYFrVCFv2CrIrNe5nX82FScL0TzIXjA7qUl9HZAz" 
+FILE_SHEET_GOC = "BA_ads_daily_20260120" 
 
 DANH_SACH_TKQC = [
     {"id": "581662847745376", "name": "tick_xanh_001"}, 
