@@ -81,31 +81,38 @@ def home():
 @app.route('/fb-ads')
 def lay_data_fb():
     def generate():
-        yield """
+        # --- THÊM DÒNG NÀY ĐỂ LẤY GIỜ ---
+        gio_bat_dau = datetime.now().strftime('%H:%M:%S - %d/%m/%Y')
+
+        yield f"""
         <style>
-            body { background-color: #0d1117; color: #c9d1d9; font-family: 'Consolas', monospace; padding: 20px; font-size: 13px; }
-            .log { margin-bottom: 4px; border-bottom: 1px dashed #21262d; padding: 2px 0; }
-            .success { color: #3fb950; }
-            .error { color: #f85149; }
-            .warning { color: #d29922; }
-            .info { color: #8b949e; }
-            .sleep { color: #d2a8ff; font-style: italic; }
-            .highlight { color: #58a6ff; font-weight: bold; }
+            body {{ background-color: #0d1117; color: #c9d1d9; font-family: 'Consolas', monospace; padding: 20px; font-size: 13px; }}
+            .log {{ margin-bottom: 4px; border-bottom: 1px dashed #21262d; padding: 2px 0; }}
+            .success {{ color: #3fb950; }}
+            .error {{ color: #f85149; }}
+            .warning {{ color: #d29922; }}
+            .info {{ color: #8b949e; }}
+            .sleep {{ color: #d2a8ff; font-style: italic; }}
+            .highlight {{ color: #58a6ff; font-weight: bold; }}
             
-            table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #161b22; font-size: 12px; }
-            th, td { border: 1px solid #30363d; padding: 8px; text-align: right; }
-            th { background-color: #21262d; text-align: center; color: #f0f6fc; }
-            td:first-child { text-align: left; }
+            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; background: #161b22; font-size: 12px; }}
+            th, td {{ border: 1px solid #30363d; padding: 8px; text-align: right; }}
+            th {{ background-color: #21262d; text-align: center; color: #f0f6fc; }}
+            td:first-child {{ text-align: left; }}
             
-            .kpi-box { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; }
-            .kpi-card { background: #161b22; border: 1px solid #30363d; padding: 10px; border-radius: 6px; }
-            .kpi-title { font-size: 11px; color: #8b949e; text-transform: uppercase; }
-            .kpi-value { font-size: 18px; font-weight: bold; margin-top: 5px; color: #f0f6fc; }
+            .kpi-box {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; }}
+            .kpi-card {{ background: #161b22; border: 1px solid #30363d; padding: 10px; border-radius: 6px; }}
+            .kpi-title {{ font-size: 11px; color: #8b949e; text-transform: uppercase; }}
+            .kpi-value {{ font-size: 18px; font-weight: bold; margin-top: 5px; color: #f0f6fc; }}
             
-            .final-section { background: #0d1117; border-top: 2px solid #30363d; margin-top: 30px; padding-top: 20px; }
-            h2 { color: #f0f6fc; margin-top: 30px; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+            .final-section {{ background: #0d1117; border-top: 2px solid #30363d; margin-top: 30px; padding-top: 20px; }}
+            h2 {{ color: #f0f6fc; margin-top: 30px; border-bottom: 1px solid #30363d; padding-bottom: 10px; }}
         </style>
         <h3>> KHỞI ĐỘNG V20 (TAGGING COLUMN)...</h3>
+        
+        <div class='log info' style='border-bottom: 2px solid #30363d; padding-bottom: 10px; margin-bottom: 10px;'>
+            🕒 BẮT ĐẦU CHẠY LÚC: <b style='color: #fff;'>{gio_bat_dau}</b>
+        </div>
         """
         
         try:
