@@ -82,7 +82,7 @@ def home():
 def lay_data_fb():
     def generate():
         # --- THÊM DÒNG NÀY ĐỂ LẤY GIỜ ---
-        gio_bat_dau = datetime.now().strftime('%H:%M:%S - %d/%m/%Y')
+        gio_bat_dau = (datetime.now() + timedelta(hours=7)).strftime('%H:%M:%S - %d/%m/%Y')
 
         yield f"""
         <style>
